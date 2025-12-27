@@ -1,0 +1,5 @@
+rootProject.name = 'vn-admin-data'
+
+// Multi-module: root is the existing CLI project, add a 'web' subproject
+include 'web'
+project(':web').projectDir = file('web')

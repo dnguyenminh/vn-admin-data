@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Hệ thống GIS Hành chính Việt Nam - Toàn diện</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        #map {
+            height: 100vh;
+            width: 100vw;
+            background: #f0f2f5;
+        }
+
+        .control-panel {
+            position: absolute;
+            top: 20px;
+            left: 60px;
+            z-index: 1000;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .search-container {
+            position: relative;
+            width: 300px;
+        }
+
+        #searchInput {
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .search-results {
+            position: absolute;
+            top: 45px;
+            left: 0;
+            width: 450px;
+            background: white;
+            border: 1px solid #3388ff;
+            z-index: 999999 !important;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+            display: none;
+            max-height: 300px;
+            overflow-y: auto;
+            border-radius: 5px;
+        }
+
+        .search-item {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            display: block;
+        }
+
+        .search-item:hover {
+            background-color: #e7f1ff;
+        }
+
+        select {
+            padding: 10px;
+            border-radius: 5px;
+            min-width: 160px;
+            cursor: pointer;
+            border: 1px solid #ddd;
+            height: 40px;
+        }
+
+        .district-label {
+            font-weight: bold;
+            color: #d35400;
+            text-shadow: 2px 2px 4px white;
+            pointer-events: none;
+        }
+
+        .ward-label {
+            font-size: 10px;
+            color: #003366;
+            text-shadow: 1px 1px 1px white;
+            pointer-events: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="control-panel">
+        <div class="search-container">
+            <input type="text" id="searchInput" placeholder="Tìm tỉnh, huyện, xã..." autocomplete="off">
+            <div id="searchResults" class="search-results"></div>
+        </div>
+        <select id="provinceSelect">
+            <option value="">-- Chọn Tỉnh --</option>
+        </select>
+        <select id="districtSelect">
+            <option value="">-- Chọn Huyện --</option>
+        </select>
+        <select id="wardSelect">
+            <option value="">-- Chọn Xã --</option>
+        </select>
+    </div>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // --- 1. KHỞI TẠO BẢN ĐỒ VÀ LAYERS ---
+        var map = L.map('map').setView([10.5, 105.1], 7);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        var provinceLayer = L.geoJSON(null).addTo(map);
+        var districtLayer = L.geoJSON(null).addTo(map);
+        var wardLayer = L.geoJSON(null).addTo(map);
+        var labelGroup = L.layerGroup().addTo(map);
+
+        const resultsContainer = document.getElementById('searchResults');
+        const searchInput = document.getElementById('searchInput');
+        const pSel = document.getElementById('provinceSelect');
+        const dSel = document.getElementById('districtSelect');
+        const wSel = document.getElementById('wardSelect');
+
+        // --- 2. XỬ LÝ SEARCH ---
+        resultsContainer.onmousedown = function (e) {
+            e.preventDefault();
+            const itemElement = e.target.closest('.search-item');
+            if (itemElement) {
+                const itemData = JSON.parse(itemElement.getAttribute('data-json'));
+                selectSearchResult(itemData);
+            }
+        };
+
+        document.addEventListener('mousedown', function (e) {
+            if (!e.target.closest('.search-container')) resultsContainer.style.display = 'none';
+        });
+
+        let debounceTimer;
+        searchInput.oninput = function () {
+            clearTimeout(debounceTimer);
+            const q = this.value;
+            if (q.length < 2) { resultsContainer.style.display = 'none'; return; }
+            debounceTimer = setTimeout(() => {
+                fetch(`/api/map/search?q=${encodeURIComponent(q)}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        resultsContainer.innerHTML = '';
+                        if (data.length > 0) {
+                            data.forEach(item => {
+                                const div = document.createElement('div');
+                                div.className = 'search-item';
+                                div.setAttribute('data-json', JSON.stringify(item));
+                                div.innerHTML = `<strong>${item.name}</strong> <small>(${item.type})</small>`;
+                                resultsContainer.appendChild(div);
+                            });
+                            resultsContainer.style.display = 'block';
+                        }
+                    });
+            }, 400);
+        };
+
+        async function selectSearchResult(item) {
+            resultsContainer.style.display = 'none';
+            searchInput.value = item.name.split(',')[0];
+
+            if (item.type === 'province') {
+                pSel.value = item.id;
+                pSel.dispatchEvent(new Event('change'));
+            }
+            else if (item.type === 'district') {
+                pSel.value = item.parent_id;
+                // Chờ load xong danh sách huyện rồi mới gán ID huyện
+                await handleProvinceChange(item.parent_id);
+                dSel.value = item.id;
+                if (dSel.value === item.id) {
+                    dSel.dispatchEvent(new Event('change'));
+                } else {
+                    console.warn("[FIX] Không thể gán ID Huyện ngay, đang thử lại...");
+                }
+            }
+        }
+
+        // --- 3. LOGIC XỬ LÝ DỮ LIỆU ĐẦY ĐỦ ---
+
+        // Hàm bao bọc onchange tỉnh để dùng được async/await
+        async function handleProvinceChange(pid) {
+            clearAll(false);
+            // 1. Load Bounds Tỉnh
+            const boundsRes = await fetch(`/api/map/province/bounds?provinceId=${pid}`);
+            const boundsData = await boundsRes.json();
+            provinceLayer.clearLayers();
+            provinceLayer.addData(boundsData);
+            provinceLayer.setStyle({ fillColor: "#ffcccc", fillOpacity: 0.5, color: "#e74c3c", weight: 3 });
+            map.fitBounds(provinceLayer.getBounds());
+
+            // 2. Load Danh sách Huyện (Quan trọng để search không bị warning)
+            await loadDistricts(pid);
+        }
+
+        pSel.onchange = () => handleProvinceChange(pSel.value);
+
+        dSel.onchange = function () {
+            const did = this.value;
+            wardLayer.clearLayers();
+            if (!did) {
+                if (provinceLayer.getLayers().length > 0) map.fitBounds(provinceLayer.getBounds());
+                districtLayer.setStyle({ fillColor: "transparent", fillOpacity: 0 });
+                return;
+            }
+            districtLayer.eachLayer(l => {
+                if (l.feature.properties.id === did) {
+                    map.fitBounds(l.getBounds());
+                    l.setStyle({ fillColor: "#2ecc71", fillOpacity: 0.7, color: "#27ae60", weight: 4 });
+                } else { districtLayer.resetStyle(l); }
+            });
+            loadWards(did);
+        };
+
+        async function loadDistricts(pid) {
+            dSel.innerHTML = '<option value="">-- Chọn Huyện --</option>';
+            const res = await fetch(`/api/map/districts?provinceId=${pid}`);
+            const data = await res.json();
+            data.forEach(d => dSel.add(new Option(d.name, d.id)));
+
+            // Load GeoJSON ranh giới huyện
+            const geoRes = await fetch(`/api/map/districts/geojson?provinceId=${pid}`);
+            const geoData = await geoRes.json();
+            districtLayer.clearLayers();
+            labelGroup.clearLayers();
+            districtLayer.addData(geoData);
+            districtLayer.setStyle({ fillColor: "transparent", color: "#e74c3c", weight: 1 });
+
+            districtLayer.eachLayer(l => {
+                l.on('mouseover', (e) => {
+                    if (dSel.value !== e.target.feature.properties.id)
+                        e.target.setStyle({ fillColor: "#2ecc71", fillOpacity: 0.4 });
+                });
+                l.on('mouseout', (e) => {
+                    if (dSel.value !== e.target.feature.properties.id)
+                        districtLayer.resetStyle(e.target);
+                });
+                if (l.feature.properties.center) {
+                    var c = l.feature.properties.center.coordinates;
+                    L.marker([c[1], c[0]], {
+                        icon: L.divIcon({ className: 'district-label', html: l.feature.properties.name, iconSize: [120, 20] })
+                    }).addTo(labelGroup);
+                }
+            });
+        }
+
+        async function loadWards(did) {
+            wSel.innerHTML = '<option value="">-- Chọn Xã --</option>';
+            const res = await fetch(`/api/map/wards?districtId=${did}`);
+            const data = await res.json();
+            data.forEach(w => wSel.add(new Option(w.name, w.id)));
+
+            const geoRes = await fetch(`/api/map/wards/geojson?districtId=${did}`);
+            const geoData = await geoRes.json();
+            wardLayer.clearLayers();
+            wardLayer.addData(geoData);
+            wardLayer.setStyle({ fillColor: "transparent", color: "#3498db", weight: 1 });
+            wardLayer.eachLayer(l => {
+                if (l.feature.properties.center) {
+                    var c = l.feature.properties.center.coordinates;
+                    L.marker([c[1], c[0]], {
+                        icon: L.divIcon({ className: 'ward-label', html: l.feature.properties.name, iconSize: [100, 20] })
+                    }).addTo(labelGroup);
+                }
+            });
+        }
+
+        function clearAll(clearP = true) {
+            if (clearP) pSel.value = "";
+            dSel.innerHTML = '<option value="">-- Chọn Huyện --</option>';
+            wSel.innerHTML = '<option value="">-- Chọn Xã --</option>';
+            provinceLayer.clearLayers(); districtLayer.clearLayers(); wardLayer.clearLayers(); labelGroup.clearLayers();
+        }
+
+        fetch('/api/map/provinces').then(res => res.json()).then(data => data.forEach(p => pSel.add(new Option(p.name, p.id))));
+    </script>
+</body>
+
+</html>

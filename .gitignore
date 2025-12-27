@@ -1,0 +1,40 @@
+# Gradle / Java
+/.gradle/
+/build/
+**/build/
+/.idea/
+*.iml
+.classpath
+.project
+.settings/
+/.vscode/
+/*.log
+*.class
+
+# IntelliJ
+out/
+
+# macOS
+.DS_Store
+
+# Logs and temp
+/logs/
+/tmp/
+
+# Eclipse
+/.metadata/
+
+# Gradle wrapper
+gradle-wrapper.jar
+
+# Ignore local environment files
+.env
+
+# Ignore large data files (adjust if you want these in repo)
+/data/
+
+# Ignore distribution artifacts
+/distributions/
+
+# OS-specific
+Thumbs.db
