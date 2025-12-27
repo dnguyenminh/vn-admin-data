@@ -23,6 +23,18 @@ Run the app (default uses an H2 TCP database at `./data/vn_admin_db`):
 ./gradlew run
 ```
 
+Run the app in development mode (enables dev-only features such as redirecting `/` to a running Nuxt dev server):
+
+```bash
+# Option A: use the convenience Gradle task
+./gradlew bootRunDev
+
+# Option B: set Spring profile to `dev`
+./gradlew bootRun -Dspring.profiles.active=dev
+
+# NOTE: ensure your Nuxt dev server is running (default: http://localhost:3001)
+```
+
 What it does:
   - `level1_provinces(name, ubnd_lat, ubnd_lon, center_lat, center_lon, geom_geojson)`
   - `level2_districts(tinh, name, ubnd_lat, ubnd_lon, center_lat, center_lon, geom_geojson)`

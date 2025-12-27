@@ -26,7 +26,7 @@ dependencies {
     implementation 'org.postgresql:postgresql:42.7.4'
     implementation 'org.hibernate.orm:hibernate-spatial:6.6.1.Final'
     // Embedded H2 for local testing and H2Launcher
-    implementation 'com.h2database:h2:2.2.220'
+    // implementation 'com.h2database:h2:2.2.220'
     
     // 3. JTS (Java Topology Suite) - Thư viện lõi xử lý hình học
     implementation 'org.locationtech.jts:jts-core:1.19.0'
@@ -51,4 +51,12 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+// Convenience task to run the app with the 'dev' profile enabled (useful to enable frontend redirect)
+tasks.register('bootRunDev', org.springframework.boot.gradle.tasks.run.BootRun) {
+    group = 'application'
+    description = 'Run Spring Boot with dev profile (enables frontend.dev redirect)'
+    systemProperty 'spring.profiles.active', 'dev'
+    jvmArgs = ['-Dspring.profiles.active=dev']
 }
