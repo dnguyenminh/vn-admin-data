@@ -38,3 +38,6 @@ gradle-wrapper.jar
 
 # OS-specific
 Thumbs.db
+
+# H2 database files
+*.mv.db
