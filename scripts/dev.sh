@@ -73,7 +73,8 @@ FRONTEND_LOG="$LOG_DIR/frontend.log"
 
 echo "Starting backend (dev profile) -> logs: $BACKEND_LOG"
 cd "$ROOT_DIR"
-./gradlew bootRunDev > "$BACKEND_LOG" 2>&1 &
+# Use bootRun with the dev profile instead of the custom task to avoid "No main class specified" issues
+./gradlew bootRun -Dspring.profiles.active=dev > "$BACKEND_LOG" 2>&1 &
 BACKEND_PID=$!
 echo "Backend PID: $BACKEND_PID"
 
