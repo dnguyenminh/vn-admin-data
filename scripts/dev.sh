@@ -4,7 +4,60 @@ set -euo pipefail
 # Dev helper: start backend (dev profile) and frontend dev server together
 # Usage: ./scripts/dev.sh
 
+# Basic system checks
+check_requirements() {
+  local ok=1
+  if ! command -v java >/dev/null 2>&1; then
+    echo "ERROR: 'java' not found in PATH. Install a JDK (e.g., OpenJDK 17+)."
+    ok=0
+  else
+    echo -n "Java: "; java -version 2>&1 | sed -n '1p'
+  fi
+
+  if [ -x "${ROOT_DIR}/gradlew" ]; then
+    echo -n "Gradle wrapper: "; ${ROOT_DIR}/gradlew --version 2>&1 | sed -n '1p'
+  elif command -v gradle >/dev/null 2>&1; then
+    echo -n "Gradle: "; gradle --version 2>&1 | sed -n '1p'
+  else
+    echo "ERROR: 'gradle' not found and no './gradlew' wrapper is present. Install Gradle or ensure './gradlew' exists."
+    ok=0
+  fi
+
+  if ! command -v node >/dev/null 2>&1; then
+    echo "ERROR: 'node' not found in PATH. Install Node.js (v16+ recommended)."
+    ok=0
+  else
+    echo -n "Node: "; node -v
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "ERROR: 'npm' not found in PATH. Install npm (usually comes with Node.js)."
+    ok=0
+  else
+    echo -n "npm: "; npm -v
+  fi
+
+  if [ "$ok" -ne 1 ]; then
+    echo "\nOne or more required tools are missing; please install them and re-run this script."
+    exit 1
+  fi
+}
+
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Support a 'check-only' mode so developers can validate the environment without starting servers
+CHECK_ONLY=false
+if [ "${1:-}" = "--check" ] || [ "${1:-}" = "-c" ]; then
+  CHECK_ONLY=true
+fi
+
+# Run checks first
+check_requirements
+
+if [ "$CHECK_ONLY" = true ]; then
+  echo "Environment checks passed. Exiting (check-only mode)."
+  exit 0
+fi
 LOG_DIR="$ROOT_DIR/logs/dev"
 mkdir -p "$LOG_DIR"
 
