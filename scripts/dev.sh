@@ -37,6 +37,13 @@ check_requirements() {
     echo -n "npm: "; npm -v
   fi
 
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "ERROR: 'curl' not found in PATH. Install curl to allow health checks."
+    ok=0
+  else
+    echo -n "curl: "; curl --version 2>/dev/null | head -n1
+  fi
+
   if [ "$ok" -ne 1 ]; then
     echo "\nOne or more required tools are missing; please install them and re-run this script."
     exit 1
@@ -69,6 +76,23 @@ cd "$ROOT_DIR"
 ./gradlew bootRunDev > "$BACKEND_LOG" 2>&1 &
 BACKEND_PID=$!
 echo "Backend PID: $BACKEND_PID"
+
+# Wait until backend responds to health check (timeout)
+HEALTH_URL="http://localhost:8080/api/health"
+echo "Waiting for backend health endpoint $HEALTH_URL to respond..."
+MAX_WAIT=30
+COUNT=0
+until curl -sSf "$HEALTH_URL" >/dev/null 2>&1; do
+  sleep 1
+  COUNT=$((COUNT + 1))
+  if [ $COUNT -ge $MAX_WAIT ]; then
+    echo "ERROR: backend did not become healthy within ${MAX_WAIT}s. Check $BACKEND_LOG for details.";
+    echo "Stopping backend (PID $BACKEND_PID)";
+    kill "$BACKEND_PID" 2>/dev/null || true
+    exit 1
+  fi
+done
+echo "Backend is healthy."
 
 echo "Starting frontend (Nuxt dev) -> logs: $FRONTEND_LOG"
 cd "$ROOT_DIR/web"
