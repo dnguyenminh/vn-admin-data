@@ -35,6 +35,14 @@ Run the app in development mode (enables dev-only features such as redirecting `
 # NOTE: ensure your Nuxt dev server is running (default: http://localhost:3001)
 ```
 
+Start both backend (dev profile) and frontend together (convenience):
+
+```bash
+./scripts/dev.sh
+
+# Press Ctrl+C to stop both processes; logs are written to `logs/dev/`.
+```
+
 What it does:
   - `level1_provinces(name, ubnd_lat, ubnd_lon, center_lat, center_lon, geom_geojson)`
   - `level2_districts(tinh, name, ubnd_lat, ubnd_lon, center_lat, center_lon, geom_geojson)`
