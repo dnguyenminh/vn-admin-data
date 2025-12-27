@@ -6,19 +6,22 @@
 
 <script setup lang="ts">
 import { onMounted, watch } from 'vue';
-import L from 'leaflet';
 import { useGisStore } from '~/stores/gisStore';
 import { useGisApi } from '~/composables/useGisApi';
 
 const store = useGisStore();
 const api = useGisApi();
 
-let map: L.Map;
-let provinceLayer: L.GeoJSON;
-let districtLayer: L.GeoJSON;
-let wardLayer: L.GeoJSON;
+let map: any;
+let provinceLayer: any;
+let districtLayer: any;
+let wardLayer: any;
+let L: any;
 
-onMounted(() => {
+onMounted(async () => {
+  // Import Leaflet only on the client to avoid SSR "window is not defined" errors
+  L = (await import('leaflet')).default;
+  // load default tile layer and create layers
   map = L.map('map').setView([10.5, 105.1], 7);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
