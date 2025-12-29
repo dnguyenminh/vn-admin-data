@@ -79,7 +79,7 @@ export default class MapManager {
                     if (options.fit && l.getBounds) {
                         const bounds = l.getBounds();
                         if (!this._boundsFullyContained(bounds)) {
-                            this.map.fitBounds(bounds);
+                            this.map.fitBounds(bounds, { padding: [20, 20] });
                         }
                     }
                 } else {
@@ -138,7 +138,7 @@ export default class MapManager {
                     if (options.fit && l.getBounds) {
                         const bounds = l.getBounds();
                         if (!this._boundsFullyContained(bounds)) {
-                            this.map.fitBounds(bounds);
+                            this.map.fitBounds(bounds, { padding: [20, 20] });
                         }
                     }
                 } else {
@@ -151,13 +151,15 @@ export default class MapManager {
         });
     }
 
-    // Return true when the provided bounds are already fully inside the current
-    // map view. This avoids calling fitBounds when the map already shows the
-    // target area, preventing redundant zoom/pan operations.
+    // Return true when the provided bounds are already well inside the current
+    // map view. We shrink the current bounds slightly to allow recentering when
+    // the feature is visible but off-center (so users still get a neat focus).
     _boundsFullyContained(bounds) {
-        if (!bounds || bounds.isValid === false) return false;
+        if (!bounds) return false;
+        if (typeof bounds.isValid === 'function' && !bounds.isValid()) return false;
         const mapBounds = this.map.getBounds();
-        return mapBounds.contains(bounds.getNorthEast()) && mapBounds.contains(bounds.getSouthWest());
+        const inner = mapBounds.pad(-0.25);
+        return inner.contains(bounds);
     }
 
     setSelectedDistrictId(id) { this._selectedDistrictId = id; }
