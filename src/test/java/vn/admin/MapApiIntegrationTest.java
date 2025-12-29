@@ -16,7 +16,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(classes = vn.admin.web.MapApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
-@org.junit.jupiter.api.Disabled("Requires Docker/PostGIS; enable when Docker available")
 public class MapApiIntegrationTest {
 
     // Use a PostGIS-enabled image. Adjust tag if needed.
