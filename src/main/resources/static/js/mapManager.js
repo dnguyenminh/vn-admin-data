@@ -76,7 +76,12 @@ export default class MapManager {
                 const id = l.feature && l.feature.properties && l.feature.properties.id;
                 if (id === districtId || id === String(districtId) || id === Number(districtId)) {
                     l.setStyle && l.setStyle({ fillColor: '#2ecc71', fillOpacity: 0.7, color: '#27ae60', weight: 4 });
-                    if (options.fit && l.getBounds) this.map.fitBounds(l.getBounds());
+                    if (options.fit && l.getBounds) {
+                        const bounds = l.getBounds();
+                        if (!this._boundsFullyContained(bounds)) {
+                            this.map.fitBounds(bounds);
+                        }
+                    }
                 } else {
                     this.districtLayer.resetStyle && this.districtLayer.resetStyle(l);
                 }
@@ -130,7 +135,12 @@ export default class MapManager {
                 const id = l.feature && l.feature.properties && l.feature.properties.id;
                 if (id === wardId || id === String(wardId) || id === Number(wardId)) {
                     l.setStyle && l.setStyle({ fillColor: '#2ecc71', fillOpacity: 0.7, color: '#27ae60', weight: 4 });
-                    if (options.fit && l.getBounds) this.map.fitBounds(l.getBounds());
+                    if (options.fit && l.getBounds) {
+                        const bounds = l.getBounds();
+                        if (!this._boundsFullyContained(bounds)) {
+                            this.map.fitBounds(bounds);
+                        }
+                    }
                 } else {
                     // reset style for non-selected wards
                     this.wardLayer.resetStyle && this.wardLayer.resetStyle(l);
@@ -139,6 +149,15 @@ export default class MapManager {
                 // ignore layers that don't conform to expected GeoJSON shape
             }
         });
+    }
+
+    // Return true when the provided bounds are already fully inside the current
+    // map view. This avoids calling fitBounds when the map already shows the
+    // target area, preventing redundant zoom/pan operations.
+    _boundsFullyContained(bounds) {
+        if (!bounds || bounds.isValid === false) return false;
+        const mapBounds = this.map.getBounds();
+        return mapBounds.contains(bounds.getNorthEast()) && mapBounds.contains(bounds.getSouthWest());
     }
 
     setSelectedDistrictId(id) { this._selectedDistrictId = id; }
