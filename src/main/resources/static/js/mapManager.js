@@ -75,13 +75,8 @@ export default class MapManager {
             try {
                 const id = l.feature && l.feature.properties && l.feature.properties.id;
                 if (id === districtId || id === String(districtId) || id === Number(districtId)) {
-                    l.setStyle && l.setStyle({ fillColor: '#2ecc71', fillOpacity: 0.7, color: '#27ae60', weight: 4 });
-                    if (options.fit && l.getBounds) {
-                        const bounds = l.getBounds();
-                        if (!this._boundsFullyContained(bounds)) {
-                            this.map.fitBounds(bounds, { padding: [20, 20] });
-                        }
-                    }
+                    l.setStyle && l.setStyle(this._getHighlightStyle('district'));
+                    if (options.fit && l.getBounds) this.map.fitBounds(l.getBounds());
                 } else {
                     this.districtLayer.resetStyle && this.districtLayer.resetStyle(l);
                 }
@@ -134,13 +129,8 @@ export default class MapManager {
             try {
                 const id = l.feature && l.feature.properties && l.feature.properties.id;
                 if (id === wardId || id === String(wardId) || id === Number(wardId)) {
-                    l.setStyle && l.setStyle({ fillColor: '#2ecc71', fillOpacity: 0.7, color: '#27ae60', weight: 4 });
-                    if (options.fit && l.getBounds) {
-                        const bounds = l.getBounds();
-                        if (!this._boundsFullyContained(bounds)) {
-                            this.map.fitBounds(bounds, { padding: [20, 20] });
-                        }
-                    }
+                    l.setStyle && l.setStyle(this._getHighlightStyle('ward'));
+                    if (options.fit && l.getBounds) this.map.fitBounds(l.getBounds());
                 } else {
                     // reset style for non-selected wards
                     this.wardLayer.resetStyle && this.wardLayer.resetStyle(l);
@@ -151,16 +141,16 @@ export default class MapManager {
         });
     }
 
-    // Return true when the provided bounds are already well inside the current
-    // map view. We shrink the current bounds slightly to allow recentering when
-    // the feature is visible but off-center (so users still get a neat focus).
-    _boundsFullyContained(bounds) {
-        if (!bounds) return false;
-        if (typeof bounds.isValid === 'function' && !bounds.isValid()) return false;
-        const mapBounds = this.map.getBounds();
-        const inner = mapBounds.pad(-0.25);
-        return inner.contains(bounds);
-    }
-
     setSelectedDistrictId(id) { this._selectedDistrictId = id; }
+
+    // Return a style object for highlighted features that keeps fill low at
+    // high zoom levels so the basemap street labels remain readable.
+    _getHighlightStyle(layerType) {
+        const zoom = (this.map && this.map.getZoom) ? this.map.getZoom() : 0;
+        // Slightly different weights for district vs ward could be used; keep
+        // both visually distinct while preserving labels.
+        const weight = (layerType === 'district') ? 4 : 3;
+        const fillOpacity = (zoom >= this.zoomThreshold) ? 0.12 : 0.35;
+        return { fillColor: '#2ecc71', fillOpacity, color: '#27ae60', weight };
+    }
 }
