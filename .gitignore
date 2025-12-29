@@ -36,6 +36,9 @@ gradle-wrapper.jar
 # Ignore distribution artifacts
 /distributions/
 
+# Build output
+/target/
+
 # OS-specific
 Thumbs.db
 
