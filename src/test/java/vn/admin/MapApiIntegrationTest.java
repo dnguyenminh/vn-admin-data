@@ -112,4 +112,54 @@ public class MapApiIntegrationTest {
         var searchResp = restTemplate.getForObject(searchUrl, Object.class);
         assertThat(searchResp).isNotNull();
     }
+
+        @Test
+        void customerAddressCheckinEndpoints() throws Exception {
+        // Ensure PostGIS extension
+        jdbcTemplate.execute("CREATE EXTENSION IF NOT EXISTS postgis");
+
+        // Create minimal customer/checkin tables
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS customer_address (appl_id varchar(50), address varchar(1000), address_type varchar(50), address_lat float4, address_long float4, id serial PRIMARY KEY)");
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS checkin_address (appl_id varchar(50), fc_id varchar(50), checkin_address varchar(1000), field_lat float4, field_long float4, checkin_date varchar(50), distance float4, customer_address_id int, id serial PRIMARY KEY)");
+
+        // insert an address and return id
+        Integer addrId = jdbcTemplate.queryForObject(
+            "INSERT INTO customer_address (appl_id,address,address_type,address_lat,address_long) VALUES (?,?,?,?,?) RETURNING id",
+            Integer.class, "C1", "123 Example St", "home", 10.0f, 105.0f);
+        assertThat(addrId).isNotNull();
+
+        // insert two checkins with different fc_id
+        Integer chk1 = jdbcTemplate.queryForObject(
+            "INSERT INTO checkin_address (appl_id,fc_id,checkin_address,field_lat,field_long,checkin_date,distance,customer_address_id) VALUES (?,?,?,?,?,?,?,?) RETURNING id",
+            Integer.class, "C1", "FC1", "123 Example St", 10.0001f, 105.0001f, "2025-12-29", 5.0f, addrId);
+        Integer chk2 = jdbcTemplate.queryForObject(
+            "INSERT INTO checkin_address (appl_id,fc_id,checkin_address,field_lat,field_long,checkin_date,distance,customer_address_id) VALUES (?,?,?,?,?,?,?,?) RETURNING id",
+            Integer.class, "C1", "FC2", "123 Example St", 10.0002f, 105.0002f, "2025-12-29", 3.0f, addrId);
+
+        String base = "http://localhost:" + port + "/api/map";
+
+        var custs = restTemplate.getForObject(base + "/customers", Object.class);
+        assertThat(custs).isNotNull();
+
+        var addrs = restTemplate.getForObject(base + "/addresses?applId=C1", Object.class);
+        assertThat(addrs).isNotNull();
+
+        String addrGeo = restTemplate.getForObject(base + "/addresses/geojson?applId=C1", String.class);
+        assertThat(addrGeo).isNotNull();
+        assertThat(addrGeo).contains("FeatureCollection");
+
+        String chkGeoAll = restTemplate.getForObject(base + "/checkins/geojson?applId=C1", String.class);
+        assertThat(chkGeoAll).isNotNull();
+        assertThat(chkGeoAll).contains("FeatureCollection");
+        assertThat(chkGeoAll).contains("FC1").contains("FC2");
+
+        String chkGeoFc1 = restTemplate.getForObject(base + "/checkins/geojson?applId=C1&fcId=FC1", String.class);
+        assertThat(chkGeoFc1).isNotNull();
+        assertThat(chkGeoFc1).contains("FeatureCollection");
+        assertThat(chkGeoFc1).contains("FC1");
+        assertThat(chkGeoFc1).doesNotContain("FC2");
+
+        var fcids = restTemplate.getForObject(base + "/checkins/fcids?applId=C1", Object.class);
+        assertThat(fcids).isNotNull();
+        }
 }
