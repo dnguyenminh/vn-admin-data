@@ -5,6 +5,9 @@ export default class UIManager {
         this.pSel = document.getElementById('provinceSelect');
         this.dSel = document.getElementById('districtSelect');
         this.wSel = document.getElementById('wardSelect');
+        this.cSel = document.getElementById('customerSelect');
+        this.aSel = document.getElementById('addressSelect');
+        this.fcSel = document.getElementById('fcSelect');
 
         this.ignoreInput = false;
     }
@@ -70,5 +73,20 @@ export default class UIManager {
     populateWards(list) {
         this.wSel.innerHTML = '<option value="">-- Chọn Xã --</option>';
         list.forEach(w => this.wSel.add(new Option(w.name, w.id)));
+    }
+
+    populateCustomers(list) {
+        this.cSel.innerHTML = '<option value="">-- Chọn Khách hàng (appl_id) --</option>';
+        list.forEach(c => this.cSel.add(new Option(c.name, c.id)));
+    }
+
+    populateAddresses(list) {
+        this.aSel.innerHTML = '<option value="">-- Chọn Địa chỉ --</option>';
+        list.forEach(a => this.aSel.add(new Option(a.name, a.id)));
+    }
+
+    populateFcIds(list) {
+        this.fcSel.innerHTML = '<option value="">-- Chọn Field Collector (fc_id) --</option>';
+        list.forEach(f => this.fcSel.add(new Option(f.name, f.id)));
     }
 }

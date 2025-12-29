@@ -33,4 +33,30 @@ export default class ApiClient {
         const res = await fetch(`/api/map/wards/geojson?districtId=${did}`);
         return res.json();
     }
+
+    static async getCustomers() {
+        const res = await fetch('/api/map/customers');
+        return res.json();
+    }
+
+    static async getAddresses(applId) {
+        const res = await fetch(`/api/map/addresses?applId=${encodeURIComponent(applId)}`);
+        return res.json();
+    }
+
+    static async getAddressesGeoJson(applId) {
+        const res = await fetch(`/api/map/addresses/geojson?applId=${encodeURIComponent(applId)}`);
+        return res.json();
+    }
+
+    static async getCheckinsGeoJson(applId, fcId = '') {
+        const fcParam = fcId ? `&fcId=${encodeURIComponent(fcId)}` : '';
+        const res = await fetch(`/api/map/checkins/geojson?applId=${encodeURIComponent(applId)}${fcParam}`);
+        return res.json();
+    }
+
+    static async getCheckinFcIds(applId) {
+        const res = await fetch(`/api/map/checkins/fcids?applId=${encodeURIComponent(applId)}`);
+        return res.json();
+    }
 }

@@ -127,6 +127,79 @@ public class MapService {
         return jdbcTemplate.queryForList(sql, districtId);
     }
 
+    // Customers: distinct appl_id from customer_address
+    public List<Map<String, Object>> getCustomerList() {
+        String sql = "SELECT DISTINCT appl_id as id, appl_id as name FROM customer_address WHERE appl_id IS NOT NULL ORDER BY appl_id";
+        return jdbcTemplate.queryForList(sql);
+    }
+
+    // Addresses for a given customer (list)
+    public List<Map<String, Object>> getAddressList(String applId) {
+        String sql = "SELECT id as id, address as name, address_type FROM customer_address WHERE appl_id = ? ORDER BY id";
+        return jdbcTemplate.queryForList(sql, applId);
+    }
+
+    // Addresses as GeoJSON points (address_long, address_lat)
+    public JsonNode getAddressesGeoJsonByAppl(String applId) {
+        String sql = "SELECT jsonb_build_object('type', 'FeatureCollection', 'features', jsonb_agg(features.feature)) " +
+                "FROM (" +
+                "  SELECT jsonb_build_object('type','Feature', 'geometry', ST_AsGeoJSON(ST_SetSRID(ST_Point(address_long::double precision, address_lat::double precision), 4326))::jsonb, 'properties', jsonb_build_object('id', id, 'address', address, 'address_type', address_type)) AS feature " +
+                "  FROM customer_address WHERE appl_id = ? AND address_lat IS NOT NULL AND address_long IS NOT NULL" +
+                ") features";
+        try {
+            String raw = jdbcTemplate.queryForObject(sql, String.class, applId);
+            if (raw == null) {
+                ObjectNode fc = objectMapper.createObjectNode();
+                fc.put("type", "FeatureCollection");
+                fc.set("features", objectMapper.createArrayNode());
+                return fc;
+            }
+            return objectMapper.readTree(raw);
+        } catch (Exception e) {
+            ObjectNode fc = objectMapper.createObjectNode();
+            fc.put("type", "FeatureCollection");
+            fc.set("features", objectMapper.createArrayNode());
+            return fc;
+        }
+    }
+
+    // Checkins as GeoJSON points; optional fcId filter
+    public JsonNode getCheckinsGeoJsonByAppl(String applId, String fcId) {
+        String where = " WHERE appl_id = ? AND field_lat IS NOT NULL AND field_long IS NOT NULL";
+        Object[] args;
+        if (fcId != null && !fcId.isEmpty()) {
+            where += " AND fc_id = ?";
+            args = new Object[] { applId, fcId };
+        } else {
+            args = new Object[] { applId };
+        }
+        String sql = "SELECT jsonb_build_object('type','FeatureCollection','features', jsonb_agg(features.feature)) FROM (" +
+                " SELECT jsonb_build_object('type','Feature', 'geometry', ST_AsGeoJSON(ST_SetSRID(ST_Point(field_long::double precision, field_lat::double precision),4326))::jsonb, 'properties', jsonb_build_object('id', id, 'appl_id', appl_id, 'fc_id', fc_id, 'customer_address_id', customer_address_id, 'checkin_date', checkin_date)) AS feature FROM checkin_address" +
+                where + 
+                ") features";
+        try {
+            String raw = (args.length == 2) ? jdbcTemplate.queryForObject(sql, String.class, args[0], args[1]) : jdbcTemplate.queryForObject(sql, String.class, args[0]);
+            if (raw == null) {
+                ObjectNode fc = objectMapper.createObjectNode();
+                fc.put("type", "FeatureCollection");
+                fc.set("features", objectMapper.createArrayNode());
+                return fc;
+            }
+            return objectMapper.readTree(raw);
+        } catch (Exception e) {
+            ObjectNode fc = objectMapper.createObjectNode();
+            fc.put("type", "FeatureCollection");
+            fc.set("features", objectMapper.createArrayNode());
+            return fc;
+        }
+    }
+
+    // Distinct fc_id values for a customer
+    public List<Map<String, Object>> getCheckinFcIds(String applId) {
+        String sql = "SELECT DISTINCT fc_id as id, fc_id as name FROM checkin_address WHERE appl_id = ? AND fc_id IS NOT NULL ORDER BY fc_id";
+        return jdbcTemplate.queryForList(sql, applId);
+    }
+
     public List<Map<String, Object>> searchLocation(String query) {
         String sql =
                 // Tìm Tỉnh

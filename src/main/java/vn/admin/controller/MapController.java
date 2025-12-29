@@ -72,6 +72,45 @@ public class MapController {
         return mapService.getWardList(districtId);
     }
 
+    @GetMapping("/customers")
+    public List<Map<String, Object>> getCustomers() {
+        return mapService.getCustomerList();
+    }
+
+    @GetMapping("/addresses")
+    public List<Map<String, Object>> getAddresses(@RequestParam String applId) {
+        return mapService.getAddressList(applId);
+    }
+
+    @GetMapping(value = "/addresses/geojson")
+    public ResponseEntity<JsonNode> getAddressesGeoJson(@RequestParam String applId) {
+        JsonNode json = mapService.getAddressesGeoJsonByAppl(applId);
+        if (json == null || json.isNull()) {
+            ObjectNode fc = objectMapper.createObjectNode();
+            fc.put("type", "FeatureCollection");
+            fc.set("features", objectMapper.createArrayNode());
+            return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(fc);
+        }
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(json);
+    }
+
+    @GetMapping(value = "/checkins/geojson")
+    public ResponseEntity<JsonNode> getCheckinsGeoJson(@RequestParam String applId, @RequestParam(required = false) String fcId) {
+        JsonNode json = mapService.getCheckinsGeoJsonByAppl(applId, fcId);
+        if (json == null || json.isNull()) {
+            ObjectNode fc = objectMapper.createObjectNode();
+            fc.put("type", "FeatureCollection");
+            fc.set("features", objectMapper.createArrayNode());
+            return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(fc);
+        }
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(json);
+    }
+
+    @GetMapping("/checkins/fcids")
+    public List<Map<String, Object>> getCheckinFcIds(@RequestParam String applId) {
+        return mapService.getCheckinFcIds(applId);
+    }
+
     @GetMapping("/search")
     public List<Map<String, Object>> search(@RequestParam String q) {
         return mapService.searchLocation(q);

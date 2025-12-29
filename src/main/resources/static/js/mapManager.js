@@ -7,6 +7,10 @@ export default class MapManager {
         this.districtLayer = L.geoJSON(null).addTo(this.map);
         this.wardLayer = L.geoJSON(null).addTo(this.map);
         this.labelGroup = L.layerGroup().addTo(this.map);
+        this.addressLayer = L.geoJSON(null, { pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius: 6, color: '#2c3e50', fillColor: '#34495e', fillOpacity: 0.6 }) }).addTo(this.map);
+        this.checkinGroup = L.layerGroup().addTo(this.map);
+        this._allCheckinMarkers = []; // store markers for filtering
+        this._fcColorMap = {}; // map fc_id -> color
         // Base styles for layers (used and adjusted based on zoom)
         this.styles = {
             province: { fillColor: '#ffcccc', fillOpacity: 0.12, color: '#e74c3c', weight: 3 },
@@ -45,6 +49,37 @@ export default class MapManager {
         // Slight translucent fill so streets remain readable; strokes keep boundaries clear
         this.districtLayer.setStyle(this.styles.district);
         this._attachDistrictInteractions();
+    }
+
+    showAddressesGeojson(geojson) {
+        this.addressLayer.clearLayers();
+        this.addressLayer.addData(geojson);
+        // center map to addresses if there is at least one feature
+        if (this.addressLayer.getLayers().length > 0) {
+            const bounds = this.addressLayer.getBounds();
+            if (bounds.isValid()) this.map.fitBounds(bounds, { padding: [30, 30] });
+        }
+    }
+
+    highlightAddress(addressId, options = { fit: true }) {
+        let found;
+        this.addressLayer.eachLayer(l => {
+            try {
+                const id = l.feature && l.feature.properties && l.feature.properties.id;
+                if (String(id) === String(addressId)) {
+                    l.setStyle && l.setStyle({ radius: 8, color: '#16a085', fillColor: '#1abc9c', fillOpacity: 0.9 });
+                    found = l;
+                    if (options.fit && l.getLatLng) {
+                        this.map.setView(l.getLatLng(), Math.max(this.map.getZoom(), 15));
+                    }
+                } else {
+                    l.setStyle && l.setStyle({ radius: 6, color: '#2c3e50', fillColor: '#34495e', fillOpacity: 0.6 });
+                }
+            } catch (e) {
+                // ignore
+            }
+        });
+        return !!found;
     }
 
     _attachDistrictInteractions() {
@@ -99,6 +134,54 @@ export default class MapManager {
                 }).addTo(this.labelGroup);
             }
         });
+    }
+
+    showCheckinsGeojson(geojson) {
+        // geojson features expected to have properties: id, fc_id, customer_address_id, checkin_date
+        this.clearCheckins();
+        const onEach = (feature, layer) => {
+            const p = feature.properties || {};
+            layer.bindPopup(`<div><strong>fc_id:</strong> ${p.fc_id || ''}<br/><strong>addr_id:</strong> ${p.customer_address_id || ''}<br/><strong>date:</strong> ${p.checkin_date || ''}</div>`);
+        };
+        const pointToLayer = (feature, latlng) => {
+            const fc = (feature.properties && feature.properties.fc_id) || '';
+            const color = this._getColorForFc(fc);
+            const marker = L.circleMarker(latlng, { radius: 6, color, fillColor: color, fillOpacity: 0.9 });
+            marker.featureProps = feature.properties || {};
+            this._allCheckinMarkers.push(marker);
+            return marker;
+        };
+        L.geoJSON(geojson, { pointToLayer, onEachFeature: onEach }).addTo(this.checkinGroup);
+    }
+
+    clearCheckins() {
+        this._allCheckinMarkers.length = 0;
+        this.checkinGroup.clearLayers();
+    }
+
+    // Filter checkins by customer_address_id (keep markers whose property matches)
+    filterCheckinsByAddressId(addrId) {
+        this.checkinGroup.clearLayers();
+        const toAdd = this._allCheckinMarkers.filter(m => String(m.featureProps && m.featureProps.customer_address_id) === String(addrId));
+        toAdd.forEach(m => this.checkinGroup.addLayer(m));
+    }
+
+    // Filter checkins by fc_id (when fcId is empty, show all)
+    filterCheckinsByFcId(fcId) {
+        this.checkinGroup.clearLayers();
+        const toAdd = fcId ? this._allCheckinMarkers.filter(m => String(m.featureProps && m.featureProps.fc_id) === String(fcId)) : this._allCheckinMarkers.slice();
+        toAdd.forEach(m => this.checkinGroup.addLayer(m));
+    }
+
+    _getColorForFc(fc) {
+        if (!fc) return '#7f8c8d';
+        if (this._fcColorMap[fc]) return this._fcColorMap[fc];
+        // simple color generation using HSL from hash
+        let hash = 0; for (let i = 0; i < fc.length; i++) { hash = fc.charCodeAt(i) + ((hash << 5) - hash); }
+        const h = Math.abs(hash) % 360;
+        const color = `hsl(${h} 70% 45%)`;
+        this._fcColorMap[fc] = color;
+        return color;
     }
 
     _onZoomChange() {
