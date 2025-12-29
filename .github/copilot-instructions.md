@@ -1,6 +1,7 @@
 ## VN Admin Data — Copilot instructions for code changes
 
 This file gives concise, actionable information for an AI coding agent to be productive in this repository.
+The BRD and Architecture docs stored in the docs/ directory are available for deeper context 
 
 Key context
 - Purpose: a small Java/Spring Boot toolset to extract and match Vietnamese administrative boundaries and UBND points from GADM and OSM, store results in H2 or PostGIS, and serve a minimal Leaflet web UI.

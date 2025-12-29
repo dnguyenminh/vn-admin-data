@@ -278,6 +278,38 @@ You can join `planet_osm_*` (PostGIS) with the H2 data by doing spatial queries 
 
 ---
 
+## Testing & Serenity BDD (Cucumber)
+
+This project uses the Cucumber JUnit Platform engine together with the
+`serenity-cucumber` adapter to produce Serenity outcomes and HTML reports.
+
+Key points:
+- Use the published Serenity adapter that matches the Serenity core version (this project uses `net.serenity-bdd:serenity-cucumber:5.0.2`).
+- Make the Cucumber JUnit Platform engine available at test runtime: `io.cucumber:cucumber-junit-platform-engine:7.x`.
+- Register the Serenity reporter implementation provided by the `serenity-cucumber` adapter in `src/test/resources/cucumber.properties`:
+
+```properties
+# Register the Serenity reporter for the Cucumber JUnit Platform engine
+cucumber.plugin=net.serenitybdd.cucumber.core.plugin.SerenityReporter
+```
+
+Migration note:
+- The project previously used a legacy `@RunWith(CucumberWithSerenity.class)` runner. We now prefer a pure JUnit Platform approach and have removed the runner to keep the test setup modern and simple.
+
+To run the acceptance tests and generate a Serenity report:
+
+```bash
+./gradlew test -Dserenity.outputDirectory=build/serenity --info
+```
+
+After the run, inspect the Serenity report and summary:
+
+```bash
+open build/serenity/index.html  # or cat build/serenity/summary.txt
+```
+
+---
+
 ## Next steps I can take (pick any)
 - Add `docker-compose.yml` to spin up PostGIS + import service. ✅
 - Export per-province GeoJSON files into `data/geojson/` for QA. ✅

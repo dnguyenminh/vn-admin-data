@@ -7,10 +7,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.NullNode;
+
 @Service
 public class MapService {
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private String getSql() {
         return "SELECT jsonb_build_object(" + " 'type', 'FeatureCollection',"
@@ -20,7 +27,7 @@ public class MapService {
                 + " ) AS feature " + " FROM vn_districts " + " WHERE province_id = ?" + ") features";
     }
 
-    public String getDistrictsGeoJsonByProvince(String provinceId) {
+    public JsonNode getDistrictsGeoJsonByProvince(String provinceId) {
         String sql = "SELECT jsonb_build_object(" +
                 "  'type', 'FeatureCollection'," +
                 "  'province_name', (SELECT name_vn FROM vn_provinces WHERE province_id = ?)," +
@@ -33,31 +40,44 @@ public class MapService {
                 "    'properties', jsonb_build_object(" +
                 "        'id', district_id, " +
                 "        'name', name_vn," +
-                "        'center', ST_AsGeoJSON(ST_PointOnSurface(geom_boundary))::jsonb" + // Thêm tọa độ tâm
+                "        'center', ST_AsGeoJSON(ST_PointOnSurface(geom_boundary))::jsonb" +
                 "    )" +
                 "  ) AS feature " +
                 "  FROM vn_districts " +
                 "  WHERE province_id = ?" +
                 ") features";
         try {
-            // Lưu ý: Truyền tham số provinceId 2 lần cho 2 dấu ? trong SQL
-            return jdbcTemplate.queryForObject(sql, String.class, provinceId, provinceId);
+            String raw = jdbcTemplate.queryForObject(sql, String.class, provinceId, provinceId);
+            if (raw == null) {
+                ObjectNode fc = objectMapper.createObjectNode();
+                fc.put("type", "FeatureCollection");
+                fc.set("features", objectMapper.createArrayNode());
+                return fc;
+            }
+            return objectMapper.readTree(raw);
         } catch (Exception e) {
-            return "{\"type\": \"FeatureCollection\", \"features\": []}";
+            ObjectNode fc = objectMapper.createObjectNode();
+            fc.put("type", "FeatureCollection");
+            fc.set("features", objectMapper.createArrayNode());
+            return fc;
         }
     }
 
-    public String getProvinceBounds(String provinceId) {
+    public JsonNode getProvinceBounds(String provinceId) {
         // Sử dụng ST_AsGeoJSON trực tiếp trên geom_boundary, KHÔNG dùng ST_Envelope
         String sql = "SELECT ST_AsGeoJSON(geom_boundary) FROM vn_provinces WHERE province_id = ?";
         try {
-            return jdbcTemplate.queryForObject(sql, String.class, provinceId);
+            String raw = jdbcTemplate.queryForObject(sql, String.class, provinceId);
+            if (raw == null || "null".equalsIgnoreCase(raw.trim())) {
+                return NullNode.instance;
+            }
+            return objectMapper.readTree(raw);
         } catch (Exception e) {
-            return null;
+            return NullNode.instance;
         }
     }
 
-    public String getWardsGeoJsonByDistrict(String districtId) {
+    public JsonNode getWardsGeoJsonByDistrict(String districtId) {
         String sql = "SELECT jsonb_build_object(" +
                 "  'type', 'FeatureCollection'," +
                 "  'features', jsonb_agg(features.feature)" +
@@ -69,16 +89,26 @@ public class MapService {
                 "    'properties', jsonb_build_object(" +
                 "        'id',     ward_id, " +
                 "        'name',   name_vn, " +
-                "        'center', ST_AsGeoJSON(ST_PointOnSurface(geom_boundary))::jsonb" + // Thêm dòng này
+                "        'center', ST_AsGeoJSON(ST_PointOnSurface(geom_boundary))::jsonb" +
                 "    )" +
                 "  ) AS feature " +
                 "  FROM vn_wards " +
                 "  WHERE district_id = ?" +
                 ") features";
         try {
-            return jdbcTemplate.queryForObject(sql, String.class, districtId);
+            String raw = jdbcTemplate.queryForObject(sql, String.class, districtId);
+            if (raw == null) {
+                ObjectNode fc = objectMapper.createObjectNode();
+                fc.put("type", "FeatureCollection");
+                fc.set("features", objectMapper.createArrayNode());
+                return fc;
+            }
+            return objectMapper.readTree(raw);
         } catch (Exception e) {
-            return "{\"type\": \"FeatureCollection\", \"features\": []}";
+            ObjectNode fc = objectMapper.createObjectNode();
+            fc.put("type", "FeatureCollection");
+            fc.set("features", objectMapper.createArrayNode());
+            return fc;
         }
     }
 

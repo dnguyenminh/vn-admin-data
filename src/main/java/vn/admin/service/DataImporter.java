@@ -18,6 +18,10 @@ public class DataImporter {
     private JdbcTemplate jdbcTemplate;
 
     public void importGadmData(String filePath) throws Exception {
+        importGadmData(filePath, false);
+    }
+
+    public void importGadmData(String filePath, boolean dryRun) throws Exception {
         GeoJsonReader reader = new GeoJsonReader();
         JsonObject jsonContent = JsonParser.parseReader(new FileReader(filePath)).getAsJsonObject();
         JsonArray features = jsonContent.getAsJsonArray("features");
@@ -40,16 +44,20 @@ public class DataImporter {
 
             // 1. Nạp Tỉnh (nếu chưa có)
             if (processedProvinces.add(pId)) {
-                jdbcTemplate.update(
-                        "INSERT INTO vn_provinces (province_id, name_vn) VALUES (?, ?) ON CONFLICT DO NOTHING", pId,
-                        pName);
+                if (!dryRun) {
+                    jdbcTemplate.update(
+                            "INSERT INTO vn_provinces (province_id, name_vn) VALUES (?, ?) ON CONFLICT DO NOTHING", pId,
+                            pName);
+                }
             }
 
             // 2. Nạp Huyện (nếu chưa có)
             if (processedDistricts.add(dId)) {
-                jdbcTemplate.update(
-                        "INSERT INTO vn_districts (district_id, province_id, name_vn) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
-                        dId, pId, dName);
+                if (!dryRun) {
+                    jdbcTemplate.update(
+                            "INSERT INTO vn_districts (district_id, province_id, name_vn) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+                            dId, pId, dName);
+                }
             }
 
             // 3. Nạp Xã & Cập nhật ranh giới/tọa độ bằng SQL PostGIS
@@ -59,21 +67,21 @@ public class DataImporter {
                         VALUES (?, ?, ?, ST_Multi(ST_GeomFromGeoJSON(?)), ST_PointOnSurface(ST_GeomFromGeoJSON(?)))
                         ON CONFLICT (ward_id) DO UPDATE SET geom_boundary = EXCLUDED.geom_boundary;
                     """;
-            jdbcTemplate.update(sqlWard, wId, dId, wName, geomStr, geomStr);
+            if (!dryRun) jdbcTemplate.update(sqlWard, wId, dId, wName, geomStr, geomStr);
         }
 
         // Cập nhật ranh giới gộp cho Huyện và Tỉnh từ dữ liệu Xã
-        updateUpperLevels();
+        updateUpperLevels(dryRun);
     }
 
-    private void updateUpperLevels() {
+    private void updateUpperLevels(boolean dryRun) {
         System.out.println("⏳ Đang gộp ranh giới Tỉnh/Huyện...");
-        jdbcTemplate.execute(
+        if (!dryRun) jdbcTemplate.execute(
                 "UPDATE vn_districts d SET geom_boundary = (SELECT ST_Union(geom_boundary) FROM vn_wards w WHERE w.district_id = d.district_id)");
-        jdbcTemplate.execute(
+        if (!dryRun) jdbcTemplate.execute(
                 "UPDATE vn_provinces p SET geom_boundary = (SELECT ST_Union(geom_boundary) FROM vn_districts d WHERE d.province_id = p.province_id)");
         // Tạo điểm đặt nhãn chuẩn
-        jdbcTemplate.execute("UPDATE vn_districts SET geom_label = ST_PointOnSurface(geom_boundary)");
-        jdbcTemplate.execute("UPDATE vn_provinces SET geom_label = ST_PointOnSurface(geom_boundary)");
+        if (!dryRun) jdbcTemplate.execute("UPDATE vn_districts SET geom_label = ST_PointOnSurface(geom_boundary)");
+        if (!dryRun) jdbcTemplate.execute("UPDATE vn_provinces SET geom_label = ST_PointOnSurface(geom_boundary)");
     }
 }
