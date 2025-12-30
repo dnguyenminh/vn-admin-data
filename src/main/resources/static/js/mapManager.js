@@ -62,6 +62,11 @@ export default class MapManager {
         this.addressLayer.eachLayer(l => {
             try {
                 const p = l.feature && l.feature.properties ? l.feature.properties : {};
+                // If the address is marked as non-exact (is_exact === false) draw it with a special color
+                // so users can immediately see ambiguous/non-exact addresses on the map.
+                if (p.hasOwnProperty('is_exact') && p.is_exact === false) {
+                    l.setStyle && l.setStyle({ radius: 6, color: '#e74c3c', fillColor: '#e74c3c', fillOpacity: 0.8 });
+                }
                 const ll = l.getLatLng ? l.getLatLng() : null;
                 const lat = ll ? ll.lat : null;
                 const lng = ll ? ll.lng : null;
@@ -96,7 +101,14 @@ export default class MapManager {
                         this.map.setView(l.getLatLng(), Math.max(this.map.getZoom(), 15));
                     }
                 } else {
-                    l.setStyle && l.setStyle({ radius: 6, color: '#2c3e50', fillColor: '#34495e', fillOpacity: 0.6 });
+                    // Reset style based on whether the address is exact or not. Non-exact addresses
+                    // maintain the special color so they remain visually distinct.
+                    const p = l.feature && l.feature.properties ? l.feature.properties : {};
+                    if (p.hasOwnProperty('is_exact') && p.is_exact === false) {
+                        l.setStyle && l.setStyle({ radius: 6, color: '#e74c3c', fillColor: '#e74c3c', fillOpacity: 0.8 });
+                    } else {
+                        l.setStyle && l.setStyle({ radius: 6, color: '#2c3e50', fillColor: '#34495e', fillOpacity: 0.6 });
+                    }
                 }
             } catch (e) {
                 // ignore

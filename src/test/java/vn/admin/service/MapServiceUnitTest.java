@@ -99,7 +99,11 @@ public class MapServiceUnitTest {
     @Test
     void getAddressesGeoJsonByAppl_includesIsExactProperty() throws Exception {
         String raw = "{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\",\"properties\":{\"id\":\"1\",\"address\":\"12 Nguyễn Trãi\"},\"geometry\":null}]}";
-        // stub the count(*) query first (the method queries total before features)
+        // The implementation first queries COUNT(*) (total) and then requests the
+        // feature collection. If COUNT(*) isn't stubbed the method may not reach
+        // the feature-query stub and Mockito may flag an unused/ambiguous stub
+        // (PotentialStubbingProblem). Stub COUNT(*) explicitly so the flow
+        // proceeds and the geojson response can be exercised.
         when(jdbcTemplate.queryForObject(contains("COUNT(*)"), eq(Long.class), any(Object[].class))).thenReturn(1L);
         when(jdbcTemplate.queryForObject(anyString(), eq(String.class), any(Object[].class))).thenReturn(raw);
         JsonNode node = mapService.getAddressesGeoJsonByAppl("appl1");
