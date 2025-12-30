@@ -21,6 +21,9 @@ export default class UIManager {
         this.sidebar = document.getElementById('sidebar');
         this.sidebarToggle = document.getElementById('sidebarToggle');
         this.sidebarClose = document.getElementById('sidebarClose');
+        this.showAllCheckinsToggle = document.getElementById('showAllCheckins');
+        this.focusAddressBtn = document.getElementById('focusAddressBtn');
+        this.focusFcBtn = document.getElementById('focusFcBtn');
 
         this.ignoreInput = false;
 
@@ -55,6 +58,7 @@ export default class UIManager {
         if (!dropEl || !anchorEl) return;
         try {
             const rect = anchorEl.getBoundingClientRect();
+            // compute desired width: at least anchor width, but respect configured CSS width if larger
             const computed = parseFloat(window.getComputedStyle(dropEl).width) || 0;
             const width = Math.max(rect.width, computed || rect.width);
             dropEl.style.position = 'fixed';
@@ -70,6 +74,7 @@ export default class UIManager {
     _attachDropdownRepositioner(dropEl, anchorEl) {
         if (!dropEl || !anchorEl) return;
         const handler = () => this._positionDropdown(dropEl, anchorEl);
+        // Save reference so we can remove later if needed
         dropEl._repositionHandler = handler;
         window.addEventListener('resize', handler);
         window.addEventListener('scroll', handler, true);
@@ -77,6 +82,7 @@ export default class UIManager {
             const body = this.sidebar.querySelector('.sidebar-body');
             if (body) body.addEventListener('scroll', handler);
         }
+        // initial position
         handler();
     }
 
@@ -136,12 +142,16 @@ export default class UIManager {
             div.innerHTML = `<strong>${item.name}</strong> <small>(${item.type})</small>`;
             this.resultsContainer.appendChild(div);
         });
+        // position floating so results are not clipped by parent overflow
         this._positionDropdown(this.resultsContainer, this.searchInput);
         this._attachDropdownRepositioner(this.resultsContainer, this.searchInput);
         this.resultsContainer.style.display = 'block';
     }
 
     hideResults() { this.resultsContainer.style.display = 'none'; }
+
+    // ensure reposition handlers removed when hiding
+    _hideResultsAndDetach(dropEl) { if (!dropEl) return; dropEl.style.display = 'none'; this._detachDropdownRepositioner(dropEl); }
 
     bindResultClicks(onSelect) {
         this.resultsContainer.addEventListener('click', (e) => {
@@ -289,15 +299,17 @@ export default class UIManager {
             }
         }
         this.cResults.style.display = (this.cResults.children.length > 0) ? 'block' : 'none';
-        if (this.cResults.children.length > 0) {
-            this.cResults.style.display = 'block';
+        if (this.cResults.style.display === 'block') {
             this._positionDropdown(this.cResults, this.cCombo);
             this._attachDropdownRepositioner(this.cResults, this.cCombo);
         } else {
-            this.cResults.style.display = 'none';
             this._detachDropdownRepositioner(this.cResults);
         }
     }
+
+    hideCustomerResults() { if (this.cResults) this.cResults.style.display = 'none'; }
+
+    setCustomerValue(name, id) { if (this.cCombo) { this.cCombo.value = name; this.cCombo.dataset.selectedId = String(id); } }
 
     getSelectedCustomerId() { return this.cCombo ? this.cCombo.dataset.selectedId : null; }
 
@@ -348,6 +360,12 @@ export default class UIManager {
         items.forEach(it => { const div = document.createElement('div'); div.className = 'search-item'; div.dataset.id = String(it.id); div.textContent = String(it.name); this.addressResults.appendChild(div); });
         if (list && list.total !== undefined && list.page !== undefined && list.size !== undefined) { const loaded = (list.page + 1) * list.size; if (loaded < (Number(list.total) || 0)) { const lm = document.createElement('div'); lm.className = 'search-item'; lm.dataset.loadMore = '1'; lm.textContent = 'Load more...'; this.addressResults.appendChild(lm); } }
         this.addressResults.style.display = (this.addressResults.children.length > 0) ? 'block' : 'none';
+        if (this.addressResults.style.display === 'block') {
+            this._positionDropdown(this.addressResults, this.addressCombo);
+            this._attachDropdownRepositioner(this.addressResults, this.addressCombo);
+        } else {
+            this._detachDropdownRepositioner(this.addressResults);
+        }
     }
 
     hideAddressResults() { if (this.addressResults) this.addressResults.style.display = 'none'; }
@@ -380,6 +398,23 @@ export default class UIManager {
         }
     }
 
+    // Show all checkins toggle (checkbox)
+    bindShowAllCheckins(onToggle) {
+        if (!this.showAllCheckinsToggle || typeof onToggle !== 'function') return;
+        this.showAllCheckinsToggle.onchange = (e) => { onToggle(e.target.checked); };
+    }
+
+    // Focus buttons
+    bindFocusAddress(onClick) {
+        if (!this.focusAddressBtn || typeof onClick !== 'function') return;
+        this.focusAddressBtn.addEventListener('click', (e) => { e.preventDefault(); onClick(); });
+    }
+
+    bindFocusFc(onClick) {
+        if (!this.focusFcBtn || typeof onClick !== 'function') return;
+        this.focusFcBtn.addEventListener('click', (e) => { e.preventDefault(); onClick(); });
+    }
+
     showFcResults(list, append = false) {
         if (!this.fcResults) return;
         const items = list && list.items ? list.items : (list || []);
@@ -387,13 +422,17 @@ export default class UIManager {
         items.forEach(it => { const div = document.createElement('div'); div.className = 'search-item'; div.dataset.id = String(it.id); div.textContent = String(it.name); this.fcResults.appendChild(div); });
         if (list && list.total !== undefined && list.page !== undefined && list.size !== undefined) { const loaded = (list.page + 1) * list.size; if (loaded < (Number(list.total) || 0)) { const lm = document.createElement('div'); lm.className = 'search-item'; lm.dataset.loadMore = '1'; lm.textContent = 'Load more...'; this.fcResults.appendChild(lm); } }
         this.fcResults.style.display = (this.fcResults.children.length > 0) ? 'block' : 'none';
-        if (this.fcResults.children.length > 0) {
+        if (this.fcResults.style.display === 'block') {
             this._positionDropdown(this.fcResults, this.fcCombo);
             this._attachDropdownRepositioner(this.fcResults, this.fcCombo);
         } else {
             this._detachDropdownRepositioner(this.fcResults);
         }
     }
+
+    hideFcResults() { if (this.fcResults) this.fcResults.style.display = 'none'; }
+
+    setFcValue(name, id) { if (this.fcCombo) { this.fcCombo.value = name; this.fcCombo.dataset.selectedId = String(id); } }
 
     getSelectedFcId() { return this.fcCombo ? this.fcCombo.dataset.selectedId : null; }
 
@@ -403,6 +442,7 @@ export default class UIManager {
             this.showAddressResults(list, false);
             return;
         }
+        // Fallback to legacy select if present
         if (this.aSel) {
             this.aSel.innerHTML = '<option value="">-- Chọn Địa chỉ --</option>';
             let items = list && list.items ? list.items : list || [];

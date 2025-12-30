@@ -288,6 +288,15 @@ export default class MapManager {
         if (this._selectedWardId) this.highlightWard(this._selectedWardId, { fit: false });
     }
 
+    // Focus the map on a specific lat/lng (lng,lat or lat,lng depending on input).
+    focusToLatLng(lat, lng, zoom = 15) {
+        try {
+            if (!this.map) return false;
+            this.map.setView([lat, lng], Math.max(this.map.getZoom() || 0, zoom));
+            return true;
+        } catch (e) { return false; }
+    }
+
     // Highlight a ward by id (set style and fit bounds)
     // options: { fit: true/false }
     highlightWard(wardId, options = { fit: true }) {

@@ -99,6 +99,56 @@ export default class App {
                 }
             }
         );
+        // bind show-all checkins toggle
+        this.ui.bindShowAllCheckins(async (checked) => {
+            const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+            if (!applId) return;
+            if (checked) {
+                const checkins = await this.api.getCheckinsGeoJson(applId, '', 0, 1000);
+                this.map.showCheckinsGeojson(checkins);
+            } else {
+                if (this.selectedFcId) {
+                    const checkins = await this.api.getCheckinsGeoJson(applId, this.selectedFcId, 0, 1000);
+                    this.map.showCheckinsGeojson(checkins);
+                } else {
+                    this.map.clearCheckins();
+                }
+            }
+        });
+
+        // bind focus buttons
+        this.ui.bindFocusAddress(async () => {
+            const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+            const addrId = this.selectedAddressId || this.ui.getSelectedAddressId();
+            if (!applId || !addrId) return;
+            // ensure address markers are present, then highlight
+            const addrGeo = await this.api.getAddressesGeoJson(applId, 0, this.addressesSize || 50);
+            this.map.showAddressesGeojson(addrGeo);
+            const ok = this.map.highlightAddress(addrId, { fit: true });
+            if (!ok) {
+                // fallback: fetch addresses list and center on lat/lng if available
+                const resp = await this.api.getAddressesPage(applId, '', 0, 1000);
+                const item = (resp && resp.items) ? resp.items.find(i => String(i.id) === String(addrId)) : null;
+                if (item && item.address_lat && item.address_long) {
+                    this.map.focusToLatLng(Number(item.address_lat), Number(item.address_long), 16);
+                }
+            }
+        });
+
+        this.ui.bindFocusFc(async () => {
+            const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+            const fcId = this.selectedFcId || this.ui.getSelectedFcId();
+            if (!applId || !fcId) return;
+            const checkins = await this.api.getCheckinsGeoJson(applId, fcId, 0, 1000);
+            // If there are features, focus to the first feature
+            try {
+                const features = (checkins && checkins.features) ? checkins.features : [];
+                if (features.length > 0 && features[0].geometry && features[0].geometry.coordinates) {
+                    const c = features[0].geometry.coordinates; // [lng, lat]
+                    this.map.focusToLatLng(c[1], c[0], 16);
+                }
+            } catch (e) { /* ignore */ }
+        });
         // bind address combobox
         this.addressesPage = 0;
         this.addressesQ = '';

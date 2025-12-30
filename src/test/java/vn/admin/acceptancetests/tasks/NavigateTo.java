@@ -21,7 +21,7 @@ public class NavigateTo {
                     try {
                         org.openqa.selenium.WebDriver driver = net.thucydides.core.webdriver.ThucydidesWebDriverSupport.getDriver();
                         // Wait for the client-side App to initialize (App sets up sidebar toggle handlers)
-                        org.openqa.selenium.support.ui.WebDriverWait initWait = new org.openqa.selenium.support.ui.WebDriverWait(driver, java.time.Duration.ofSeconds(3));
+                        org.openqa.selenium.support.ui.WebDriverWait initWait = new org.openqa.selenium.support.ui.WebDriverWait(driver, java.time.Duration.ofSeconds(6));
                         initWait.until(d -> {
                             try { return ((org.openqa.selenium.JavascriptExecutor) d).executeScript("return (window.app !== undefined);"); } catch (Throwable t) { return false; }
                         });

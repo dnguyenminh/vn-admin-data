@@ -243,13 +243,24 @@
                     </div>
                     <div class="address-combobox" style="position:relative;margin-bottom:8px;">
                         <label for="addressCombo">Địa chỉ</label>
-                        <input type="text" id="addressCombo" placeholder="Chọn Địa chỉ..." autocomplete="off">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <input type="text" id="addressCombo" placeholder="Chọn Địa chỉ..." autocomplete="off" style="flex:1;">
+                            <button id="focusAddressBtn" title="Focus selected customer address on map" style="border:none;background:transparent;cursor:pointer;padding:4px;font-size:14px;">🎯</button>
+                        </div>
                         <div id="addressResults" class="search-results" style="display:none; position:absolute; top:40px; left:0; width:420px; z-index:10000;"></div>
                     </div>
                     <div class="fc-combobox" style="position:relative;margin-bottom:8px;">
                         <label for="fcCombo">Field Collector (fc_id)</label>
-                        <input type="text" id="fcCombo" placeholder="Chọn Field Collector (fc_id)..." autocomplete="off">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <input type="text" id="fcCombo" placeholder="Chọn Field Collector (fc_id)..." autocomplete="off" style="flex:1;">
+                            <button id="focusFcBtn" title="Focus first checkin for selected FC" style="border:none;background:transparent;cursor:pointer;padding:4px;font-size:14px;">📍</button>
+                        </div>
                         <div id="fcResults" class="search-results" style="display:none; position:absolute; top:40px; left:0; width:320px; z-index:10000;"></div>
+                    </div>
+
+                    <div style="margin-bottom:8px; display:flex; align-items:center; gap:8px;">
+                        <input type="checkbox" id="showAllCheckins">
+                        <label for="showAllCheckins" style="margin:0;">Show all checkins for customer</label>
                     </div>
                 </div>
             </div>

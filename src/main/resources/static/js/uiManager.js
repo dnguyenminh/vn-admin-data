@@ -21,6 +21,9 @@ export default class UIManager {
         this.sidebar = document.getElementById('sidebar');
         this.sidebarToggle = document.getElementById('sidebarToggle');
         this.sidebarClose = document.getElementById('sidebarClose');
+        this.showAllCheckinsToggle = document.getElementById('showAllCheckins');
+        this.focusAddressBtn = document.getElementById('focusAddressBtn');
+        this.focusFcBtn = document.getElementById('focusFcBtn');
 
         this.ignoreInput = false;
 
@@ -393,6 +396,23 @@ export default class UIManager {
                 const itemEl = ev.target.closest('.search-item'); if (!itemEl) return; ev.stopPropagation(); if (itemEl.dataset.loadMore === '1') { if (typeof onLoadMore === 'function') onLoadMore(); return; } const id = itemEl.dataset.id; const name = itemEl.textContent.trim(); this.setFcValue(name, id); this.hideFcResults(); if (typeof onSelect === 'function') onSelect({ id, name });
             });
         }
+    }
+
+    // Show all checkins toggle (checkbox)
+    bindShowAllCheckins(onToggle) {
+        if (!this.showAllCheckinsToggle || typeof onToggle !== 'function') return;
+        this.showAllCheckinsToggle.onchange = (e) => { onToggle(e.target.checked); };
+    }
+
+    // Focus buttons
+    bindFocusAddress(onClick) {
+        if (!this.focusAddressBtn || typeof onClick !== 'function') return;
+        this.focusAddressBtn.addEventListener('click', (e) => { e.preventDefault(); onClick(); });
+    }
+
+    bindFocusFc(onClick) {
+        if (!this.focusFcBtn || typeof onClick !== 'function') return;
+        this.focusFcBtn.addEventListener('click', (e) => { e.preventDefault(); onClick(); });
     }
 
     showFcResults(list, append = false) {
