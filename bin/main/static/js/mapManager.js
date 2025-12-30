@@ -25,6 +25,26 @@ export default class MapManager {
         if (this.map && this.map.on) {
             this.map.on('zoomend', this._onZoomChange.bind(this));
         }
+
+        // Create a small legend explaining marker colors
+        this._createLegend();
+    }
+
+    _createLegend() {
+        const legend = L.control({ position: 'topright' });
+        legend.onAdd = () => {
+            const div = L.DomUtil.create('div', 'map-legend');
+            div.innerHTML = `
+                <div style="font-weight:600; margin-bottom:6px;">Map legend</div>
+                <div class="legend-item"><span class="legend-swatch" style="background:#1abc9c;"></span><div>Exact address</div></div>
+                <div class="legend-item"><span class="legend-swatch" style="background:#e74c3c;"></span><div>Non-exact / ambiguous address</div></div>
+            `;
+            // Prevent clicks on the legend from propagating to the map (avoid accidental pans)
+            L.DomEvent.disableClickPropagation(div);
+            return div;
+        };
+        legend.addTo(this.map);
+        this.legend = legend;
     }
 
     clearAll(clearProvince = true) {
