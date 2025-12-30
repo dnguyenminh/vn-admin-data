@@ -20,7 +20,12 @@
 
         #map {
             height: 100vh;
-            width: 100vw;
+            /* Use 100% width so the map fits inside the flex `main` area and
+               does not extend underneath the sidebar. Using 100vw causes the
+               map to be full-viewport width and its right edge (and the
+               Leaflet controls/legend) can end up off-screen when the
+               sidebar is visible. */
+            width: 100%;
             background: #f0f2f5;
         }
 
@@ -85,7 +90,6 @@
         #sidebarClose { background:transparent; border:none; font-size:14px; cursor:pointer; }
 
         .map-container { width:100%; height:100%; }
-        }
 
         .search-container {
             position: relative;

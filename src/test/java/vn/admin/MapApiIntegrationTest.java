@@ -172,6 +172,17 @@ public class MapApiIntegrationTest {
         String addrGeo = addrEntity.getBody();
         assertThat(addrGeo).isNotNull();
         assertThat(addrGeo).contains("FeatureCollection");
+        // Ensure the geojson includes the server-side is_exact property for this exact address
+        assertThat(addrGeo).contains("\"is_exact\":true");
+
+        // Insert a non-exact address (administrative only) with coordinates and check is_exact=false
+        Integer addrId2 = jdbcTemplate.queryForObject(
+            "INSERT INTO customer_address (appl_id,address,address_type,address_lat,address_long) VALUES (?,?,?,?,?) RETURNING id",
+            Integer.class, "C2", "Phường Phúc Xá", "ward", 10.001f, 105.001f);
+        assertThat(addrId2).isNotNull();
+        String addrGeo2 = restTemplate.getForObject(base + "/addresses/geojson?applId=C2", String.class);
+        assertThat(addrGeo2).isNotNull();
+        assertThat(addrGeo2).contains("\"is_exact\":false");
 
         String chkGeoAll = restTemplate.getForObject(base + "/checkins/geojson?applId=C1", String.class);
         assertThat(chkGeoAll).isNotNull();
