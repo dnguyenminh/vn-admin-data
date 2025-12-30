@@ -160,6 +160,80 @@ public class MapService {
         return jdbcTemplate.queryForList(sql, districtId);
     }
 
+    /**
+     * Reverse geocode a point to administrative units (province, district, ward).
+     * Returns a map with keys: provinceId, provinceName, districtId, districtName, wardId, wardName
+     */
+    public java.util.Map<String, Object> reverseLookupByPoint(double lon, double lat) {
+        java.util.Map<String, Object> out = new java.util.HashMap<>();
+        try {
+            // First try ward (most specific)
+            String wardSql = "SELECT w.ward_id as ward_id, w.name_vn as ward_name, d.district_id as district_id, d.name_vn as district_name, p.province_id as province_id, p.name_vn as province_name " +
+                    "FROM vn_wards w JOIN vn_districts d ON w.district_id = d.district_id JOIN vn_provinces p ON d.province_id = p.province_id " +
+                    "WHERE ST_Contains(w.geom_boundary, ST_SetSRID(ST_Point(?, ?), 4326)) LIMIT 1";
+            java.util.List<java.util.Map<String, Object>> wardRows = jdbcTemplate.queryForList(wardSql, lon, lat);
+            if (!wardRows.isEmpty()) {
+                java.util.Map<String, Object> row = wardRows.get(0);
+                out.put("wardId", row.get("ward_id"));
+                out.put("wardName", row.get("ward_name"));
+                out.put("districtId", row.get("district_id"));
+                out.put("districtName", row.get("district_name"));
+                out.put("provinceId", row.get("province_id"));
+                out.put("provinceName", row.get("province_name"));
+                return out;
+            }
+
+            // Try district next
+            String distSql = "SELECT d.district_id as district_id, d.name_vn as district_name, p.province_id as province_id, p.name_vn as province_name " +
+                    "FROM vn_districts d JOIN vn_provinces p ON d.province_id = p.province_id " +
+                    "WHERE ST_Contains(d.geom_boundary, ST_SetSRID(ST_Point(?, ?), 4326)) LIMIT 1";
+            java.util.List<java.util.Map<String, Object>> distRows = jdbcTemplate.queryForList(distSql, lon, lat);
+            if (!distRows.isEmpty()) {
+                java.util.Map<String, Object> row = distRows.get(0);
+                out.put("districtId", row.get("district_id"));
+                out.put("districtName", row.get("district_name"));
+                out.put("provinceId", row.get("province_id"));
+                out.put("provinceName", row.get("province_name"));
+                return out;
+            }
+
+            // Finally, try province
+            String provSql = "SELECT province_id as province_id, name_vn as province_name FROM vn_provinces WHERE ST_Contains(geom_boundary, ST_SetSRID(ST_Point(?, ?), 4326)) LIMIT 1";
+            java.util.List<java.util.Map<String, Object>> provRows = jdbcTemplate.queryForList(provSql, lon, lat);
+            if (!provRows.isEmpty()) {
+                java.util.Map<String, Object> row = provRows.get(0);
+                out.put("provinceId", row.get("province_id"));
+                out.put("provinceName", row.get("province_name"));
+                return out;
+            }
+        } catch (Exception e) {
+            log.warn("reverseLookupByPoint failed for lon={}, lat={}", lon, lat, e);
+        }
+        return out;
+    }
+
+    /**
+     * Reverse lookup for a customer address by address id.
+     * Returns the same map as reverseLookupByPoint, or empty map if coordinates missing/not found.
+     */
+    public java.util.Map<String, Object> reverseLookupByAddressId(String addressId) {
+        try {
+            // Compare on id::text so we accept both numeric and string id types without type errors
+            String sql = "SELECT address_long as lon, address_lat as lat FROM customer_address WHERE id::text = ? LIMIT 1";
+            java.util.Map<String, Object> row = jdbcTemplate.queryForMap(sql, addressId);
+            if (row != null && row.get("lon") != null && row.get("lat") != null) {
+                double lon = Double.parseDouble(String.valueOf(row.get("lon")));
+                double lat = Double.parseDouble(String.valueOf(row.get("lat")));
+                return reverseLookupByPoint(lon, lat);
+            }
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+            // ignore
+        } catch (Exception e) {
+            log.warn("reverseLookupByAddressId failed for id={}", addressId, e);
+        }
+        return new java.util.HashMap<>();
+    }
+
     // Customers: distinct appl_id from customer_address
     public List<Map<String, Object>> getCustomerList() {
         if (hasCustomersTable()) {
@@ -360,7 +434,14 @@ public class MapService {
     // Addresses for a given customer (list)
     public List<Map<String, Object>> getAddressList(String applId) {
         String sql = "SELECT id as id, address as name, address_type FROM customer_address WHERE appl_id = ? ORDER BY id";
-        return jdbcTemplate.queryForList(sql, applId);
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, applId);
+        // annotate each row with is_exact flag using heuristic
+        for (Map<String, Object> r : rows) {
+            Object addrObj = r.get("name");
+            String addr = addrObj != null ? String.valueOf(addrObj) : null;
+            r.put("is_exact", isExactAddress(addr));
+        }
+        return rows;
     }
 
     // Paged addresses for a customer with optional query
@@ -380,6 +461,12 @@ public class MapService {
         listParams.add(size);
         listParams.add(page * size);
         List<Map<String, Object>> items = jdbcTemplate.queryForList(listSql, listParams.toArray());
+        // annotate each returned item with is_exact flag
+        for (Map<String, Object> item : items) {
+            Object addrObj = item.get("name");
+            String addr = addrObj != null ? String.valueOf(addrObj) : null;
+            item.put("is_exact", isExactAddress(addr));
+        }
 
         Map<String, Object> resp = new java.util.HashMap<>();
         resp.put("items", items);
@@ -414,7 +501,20 @@ public class MapService {
                 Object[] args = new Object[] { total, page, size, applId, size, page * size };
                 String raw = jdbcTemplate.queryForObject(featuresSql, String.class, args);
                 if (raw == null) return emptyFeatureCollection();
-                return objectMapper.readTree(raw);
+                // Add is_exact property to each feature's properties based on address string
+                JsonNode root = objectMapper.readTree(raw);
+                if (root != null && root.has("features") && root.get("features").isArray()) {
+                    for (JsonNode f : root.withArray("features")) {
+                        try {
+                            JsonNode props = f.get("properties");
+                            if (props != null && props.has("address")) {
+                                String a = props.get("address").asText(null);
+                                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("is_exact", isExactAddress(a));
+                            }
+                        } catch (Exception e) { /* ignore per-feature */ }
+                    }
+                }
+                return root;
             } catch (Exception e) {
                  log.warn("getAddressesGeoJsonByAppl failed for applId={}", applId, e);
                  return emptyFeatureCollection();
@@ -424,12 +524,49 @@ public class MapService {
             try {
                 String raw = jdbcTemplate.queryForObject(featuresSql, String.class, applId);
                 if (raw == null) return emptyFeatureCollection();
-                return objectMapper.readTree(raw);
+                    JsonNode root = objectMapper.readTree(raw);
+                    if (root != null && root.has("features") && root.get("features").isArray()) {
+                        for (JsonNode f : root.withArray("features")) {
+                            try {
+                                JsonNode props = f.get("properties");
+                                if (props != null && props.has("address")) {
+                                    String a = props.get("address").asText(null);
+                                    ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("is_exact", isExactAddress(a));
+                                }
+                            } catch (Exception e) { /* ignore per-feature */ }
+                        }
+                    }
+                    return root;
             } catch (Exception e) {
                 return emptyFeatureCollection();
             }
         }
     }
+
+        /**
+         * Heuristic to detect whether an address string is an "exact" address
+         * (contains house number and street information) vs a non-exact
+         * administrative-only description (province/district/ward only).
+         */
+        public boolean isExactAddress(String address) {
+            if (address == null) return false;
+            String s = address.trim().toLowerCase();
+            if (s.isEmpty()) return false;
+            // Administrative keywords indicate non-exact addresses when present
+            if (s.matches(".*\\b(huyện|quận|phường|xã|tỉnh|thành phố|thị xã)\\b.*")) {
+                // If it's like 'Quận 1' (admin + number) treat as non-exact
+                return false;
+            }
+            boolean hasNumber = s.matches(".*\\d.*");
+            boolean hasHousePrefix = s.matches(".*\\b(số|so)\\s*\\d+.*");
+            boolean numberWithSlash = s.matches(".*\\d+\\s*\\/\\s*\\d+.*");
+            boolean hasStreetKeyword = s.matches(".*\\b(đường|duong|phố|pho|hẻm|hem|ngõ|ngo|ngách|ngach|khu phố|khu pho)\\b.*");
+            // If we have a numeric house number and either a street word or house prefix or number/compound, consider exact
+            if (hasNumber && (hasStreetKeyword || hasHousePrefix || numberWithSlash)) return true;
+            // As a fallback, if there's a number and more text (likely a street name), consider it exact
+            if (hasNumber && s.matches(".*\\d+\\s+\\p{L}+.*")) return true;
+            return false;
+        }
 
     private JsonNode emptyFeatureCollection() {
         ObjectNode fc = objectMapper.createObjectNode();

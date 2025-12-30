@@ -67,6 +67,11 @@ export default class ApiClient {
         return res.json();
     }
 
+    static async getReverseForAddress(addressId) {
+        const res = await fetch(`/api/map/reverse/address?addressId=${encodeURIComponent(addressId)}`);
+        return res.json();
+    }
+
     static async getCheckinsGeoJson(applId, fcId = '', page = null, size = null) {
         const fcParam = fcId ? `&fcId=${encodeURIComponent(fcId)}` : '';
         const pageParam = (page !== null && size !== null) ? `&page=${page}&size=${size}` : '';

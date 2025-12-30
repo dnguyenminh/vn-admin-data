@@ -17,7 +17,102 @@ export default class UIManager {
         this.fcResults = document.getElementById('fcResults');
         this.aSearch = document.getElementById('addressSearch');
 
+        // Sidebar toggle elements (if present)
+        this.sidebar = document.getElementById('sidebar');
+        this.sidebarToggle = document.getElementById('sidebarToggle');
+        this.sidebarClose = document.getElementById('sidebarClose');
+
         this.ignoreInput = false;
+
+        // If running in acceptance test mode (url contains ?acceptanceTest=1),
+        // force the sidebar open immediately and disable transitions so headless
+        // browsers can interact with controls deterministically.
+        try {
+            const params = new URLSearchParams(window.location.search);
+            if (params.has('acceptanceTest')) {
+                if (this.sidebar) {
+                    this.sidebar.classList.remove('collapsed');
+                    this.sidebar.classList.add('no-transition');
+                    // inline styles to guarantee visibility in headless environments
+                    this.sidebar.style.transform = 'translateX(0)';
+                    this.sidebar.style.visibility = 'visible';
+                    this.sidebar.style.display = 'flex';
+                }
+                if (this.sidebarToggle) this.sidebarToggle.setAttribute('aria-expanded', 'true');
+                // ensure core controls are visible
+                if (this.searchInput) { this.searchInput.style.display = 'block'; this.searchInput.style.visibility = 'visible'; }
+                if (this.pSel) { this.pSel.style.display = 'inline-block'; this.pSel.style.visibility = 'visible'; }
+                if (this.dSel) { this.dSel.style.display = 'inline-block'; this.dSel.style.visibility = 'visible'; }
+                if (this.wSel) { this.wSel.style.display = 'inline-block'; this.wSel.style.visibility = 'visible'; }
+                // If a global map reference is present, trigger an invalidateSize after a tick
+                try { setTimeout(() => { if (window.app && window.app.map && window.app.map.map) window.app.map.map.invalidateSize(); }, 50); } catch (e) { /* ignore */ }
+            }
+        } catch (e) { /* ignore in environments without URL support */ }
+    }
+
+    // Position a dropdown results element so it floats over the page (not clipped by sidebar scrolling)
+    _positionDropdown(dropEl, anchorEl) {
+        if (!dropEl || !anchorEl) return;
+        try {
+            const rect = anchorEl.getBoundingClientRect();
+            const computed = parseFloat(window.getComputedStyle(dropEl).width) || 0;
+            const width = Math.max(rect.width, computed || rect.width);
+            dropEl.style.position = 'fixed';
+            dropEl.style.left = rect.left + 'px';
+            dropEl.style.top = rect.bottom + 'px';
+            dropEl.style.width = width + 'px';
+            dropEl.style.zIndex = 20000;
+            dropEl.style.maxHeight = '40vh';
+            dropEl.style.overflowY = 'auto';
+        } catch (e) { /* ignore */ }
+    }
+
+    _attachDropdownRepositioner(dropEl, anchorEl) {
+        if (!dropEl || !anchorEl) return;
+        const handler = () => this._positionDropdown(dropEl, anchorEl);
+        dropEl._repositionHandler = handler;
+        window.addEventListener('resize', handler);
+        window.addEventListener('scroll', handler, true);
+        if (this.sidebar && this.sidebar.querySelector) {
+            const body = this.sidebar.querySelector('.sidebar-body');
+            if (body) body.addEventListener('scroll', handler);
+        }
+        handler();
+    }
+
+    _detachDropdownRepositioner(dropEl) {
+        if (!dropEl || !dropEl._repositionHandler) return;
+        const handler = dropEl._repositionHandler;
+        window.removeEventListener('resize', handler);
+        window.removeEventListener('scroll', handler, true);
+        if (this.sidebar && this.sidebar.querySelector) {
+            const body = this.sidebar.querySelector('.sidebar-body');
+            if (body) body.removeEventListener('scroll', handler);
+        }
+        delete dropEl._repositionHandler;
+    }
+
+    // Bind a callback that will be called when the sidebar is opened (only when it transitions from collapsed to open).
+    bindSidebarToggle(onOpen, onToggle) {
+        if (!this.sidebar || !this.sidebarToggle) return;
+        let openedOnce = false;
+        const setExpanded = (expanded) => {
+            this.sidebarToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+            if (expanded) this.sidebar.classList.remove('collapsed'); else this.sidebar.classList.add('collapsed');
+        };
+        this.sidebarToggle.addEventListener('click', (e) => {
+            const isExpanded = this.sidebarToggle.getAttribute('aria-expanded') === 'true';
+            setExpanded(!isExpanded);
+            const nowExpanded = !isExpanded;
+            if (!openedOnce && nowExpanded) {
+                openedOnce = true;
+                if (typeof onOpen === 'function') onOpen();
+            }
+            if (typeof onToggle === 'function') onToggle(nowExpanded);
+        });
+        if (this.sidebarClose) {
+            this.sidebarClose.addEventListener('click', (e) => { setExpanded(false); this.sidebarToggle.focus(); });
+        }
     }
 
     bindSearchInput(onInput) {
@@ -41,6 +136,8 @@ export default class UIManager {
             div.innerHTML = `<strong>${item.name}</strong> <small>(${item.type})</small>`;
             this.resultsContainer.appendChild(div);
         });
+        this._positionDropdown(this.resultsContainer, this.searchInput);
+        this._attachDropdownRepositioner(this.resultsContainer, this.searchInput);
         this.resultsContainer.style.display = 'block';
     }
 
@@ -192,11 +289,15 @@ export default class UIManager {
             }
         }
         this.cResults.style.display = (this.cResults.children.length > 0) ? 'block' : 'none';
+        if (this.cResults.children.length > 0) {
+            this.cResults.style.display = 'block';
+            this._positionDropdown(this.cResults, this.cCombo);
+            this._attachDropdownRepositioner(this.cResults, this.cCombo);
+        } else {
+            this.cResults.style.display = 'none';
+            this._detachDropdownRepositioner(this.cResults);
+        }
     }
-
-    hideCustomerResults() { if (this.cResults) this.cResults.style.display = 'none'; }
-
-    setCustomerValue(name, id) { if (this.cCombo) { this.cCombo.value = name; this.cCombo.dataset.selectedId = String(id); } }
 
     getSelectedCustomerId() { return this.cCombo ? this.cCombo.dataset.selectedId : null; }
 
@@ -286,11 +387,13 @@ export default class UIManager {
         items.forEach(it => { const div = document.createElement('div'); div.className = 'search-item'; div.dataset.id = String(it.id); div.textContent = String(it.name); this.fcResults.appendChild(div); });
         if (list && list.total !== undefined && list.page !== undefined && list.size !== undefined) { const loaded = (list.page + 1) * list.size; if (loaded < (Number(list.total) || 0)) { const lm = document.createElement('div'); lm.className = 'search-item'; lm.dataset.loadMore = '1'; lm.textContent = 'Load more...'; this.fcResults.appendChild(lm); } }
         this.fcResults.style.display = (this.fcResults.children.length > 0) ? 'block' : 'none';
+        if (this.fcResults.children.length > 0) {
+            this._positionDropdown(this.fcResults, this.fcCombo);
+            this._attachDropdownRepositioner(this.fcResults, this.fcCombo);
+        } else {
+            this._detachDropdownRepositioner(this.fcResults);
+        }
     }
-
-    hideFcResults() { if (this.fcResults) this.fcResults.style.display = 'none'; }
-
-    setFcValue(name, id) { if (this.fcCombo) { this.fcCombo.value = name; this.fcCombo.dataset.selectedId = String(id); } }
 
     getSelectedFcId() { return this.fcCombo ? this.fcCombo.dataset.selectedId : null; }
 
@@ -300,7 +403,6 @@ export default class UIManager {
             this.showAddressResults(list, false);
             return;
         }
-        // Fallback to legacy select if present
         if (this.aSel) {
             this.aSel.innerHTML = '<option value="">-- Chọn Địa chỉ --</option>';
             let items = list && list.items ? list.items : list || [];

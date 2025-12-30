@@ -50,10 +50,22 @@ export default class App {
         this.customersPage = 0;
         this.customersQ = '';
         this.customersSize = 50;
-        // Preload first page using keyset pagination (avoids expensive COUNT/OFFSET)
-        const first = await this.api.getCustomersAfter('', '', this.customersSize);
-        this.customersAfter = first.after || null;
-        this.ui.showCustomerResults(first, false);
+        // Do not preload customers until the controls sidebar is opened (lazy-load)
+        this.customersLoaded = false;
+        this.ui.bindSidebarToggle(async () => {
+            if (this.customersLoaded) return;
+            try {
+                const first = await this.api.getCustomersAfter('', '', this.customersSize);
+                this.customersAfter = first.after || null;
+                this.ui.showCustomerResults(first, false);
+                this.customersLoaded = true;
+            } catch (e) {
+                console.warn('Failed to preload customers on sidebar open', e);
+            }
+        }, (expanded) => {
+            // When the sidebar opens or closes, ensure the map invalidates its size after layout transition
+            setTimeout(() => { try { this.map.map.invalidateSize(); } catch (e) { /* ignore */ } }, 220);
+        });
 
         this.ui.bindCustomerCombo(
             // onQuery
@@ -199,6 +211,38 @@ export default class App {
         this.map.highlightAddress(addrId, { fit: true });
         // Filter checkins to this address
         this.map.filterCheckinsByAddressId(addrId);
+
+        // Reverse-geocode the selected address and populate administrative selects
+        try {
+            const rev = await this.api.getReverseForAddress(addrId);
+            if (rev && (rev.provinceId || rev.districtId || rev.wardId)) {
+                // If province determined, set province and load its districts
+                if (rev.provinceId) {
+                    // ensure provinces are populated (they are at init)
+                    this.ui.pSel.value = rev.provinceId;
+                    await this.handleProvinceChange(rev.provinceId);
+                }
+                // If district determined, populate and set
+                if (rev.districtId) {
+                    // populate districts for province (handleProvinceChange should have already done this)
+                    this.ui.dSel.value = rev.districtId;
+                    await this.handleDistrictChange(rev.districtId);
+                }
+                // If ward determined, populate and set
+                if (rev.wardId) {
+                    // ensure wards for district are loaded
+                    try {
+                        const wards = await this.api.getWards(rev.districtId);
+                        this.ui.populateWards(wards);
+                    } catch (e) { /* ignore */ }
+                    this.ui.wSel.value = rev.wardId;
+                    // highlight ward on map if possible
+                    try { this.map.highlightWard(rev.wardId); } catch (e) { /* ignore */ }
+                }
+            }
+        } catch (e) {
+            console.warn('Reverse lookup failed for address', addrId, e);
+        }
     }
 
     async handleFcChange(fcId) {

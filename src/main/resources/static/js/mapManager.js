@@ -40,6 +40,8 @@ export default class MapManager {
         // Use low fill opacity so basemap streets remain visible beneath the polygon
         this.provinceLayer.setStyle(this.styles.province);
         this.map.fitBounds(this.provinceLayer.getBounds());
+        // Ensure polygon layer stays behind point markers so points remain clickable
+        try { this.provinceLayer.bringToBack(); } catch (e) { /* ignore if not supported */ }
     }
 
     showDistrictsGeojson(geojson) {
@@ -49,6 +51,8 @@ export default class MapManager {
         // Slight translucent fill so streets remain readable; strokes keep boundaries clear
         this.districtLayer.setStyle(this.styles.district);
         this._attachDistrictInteractions();
+        // Keep districts behind point markers
+        try { this.districtLayer.bringToBack(); } catch (e) { /* ignore */ }
     }
 
     showAddressesGeojson(geojson) {
@@ -76,6 +80,8 @@ export default class MapManager {
             const bounds = this.addressLayer.getBounds();
             if (bounds.isValid()) this.map.fitBounds(bounds, { padding: [30, 30] });
         }
+        // Ensure address markers render above polygon layers so they are clickable
+        try { this.addressLayer.bringToFront(); } catch (e) { /* ignore if not supported */ }
     }
 
     highlightAddress(addressId, options = { fit: true }) {
@@ -151,6 +157,8 @@ export default class MapManager {
                 }).addTo(this.labelGroup);
             }
         });
+        // Wards should not obscure point markers
+        try { this.wardLayer.bringToBack(); } catch (e) { /* ignore */ }
     }
 
     showCheckinsGeojson(geojson) {

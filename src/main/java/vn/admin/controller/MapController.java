@@ -167,4 +167,14 @@ public class MapController {
     public List<Map<String, Object>> search(@RequestParam("q") String q) {
         return mapService.searchLocation(q);
     }
+
+    @GetMapping("/reverse")
+    public Map<String, Object> reverseByPoint(@RequestParam("lon") double lon, @RequestParam("lat") double lat) {
+        return mapService.reverseLookupByPoint(lon, lat);
+    }
+
+    @GetMapping("/reverse/address")
+    public Map<String, Object> reverseByAddress(@RequestParam("addressId") String addressId) {
+        return mapService.reverseLookupByAddressId(addressId);
+    }
 }

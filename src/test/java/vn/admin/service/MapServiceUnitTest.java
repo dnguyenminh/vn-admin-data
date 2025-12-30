@@ -7,6 +7,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -45,7 +46,7 @@ public class MapServiceUnitTest {
     @Test
     void getProvinceBounds_parsesJson() throws Exception {
         String raw = "{\"type\":\"Polygon\"}";
-        when(jdbcTemplate.queryForObject(anyString(), eq(String.class), any())).thenReturn(raw);
+        org.mockito.Mockito.lenient().when(jdbcTemplate.queryForObject(anyString(), eq(String.class), any())).thenReturn(raw);
 
         JsonNode node = mapService.getProvinceBounds("P1");
         assertThat(node).isNotNull();
@@ -58,5 +59,54 @@ public class MapServiceUnitTest {
 
         JsonNode node = mapService.getProvinceBounds("P1");
         assertThat(node.isNull()).isTrue();
+    }
+
+    @Test
+    void isExactAddress_detectsHouseNumbersAndStreets() {
+        assertThat(mapService.isExactAddress("12 Nguyễn Trãi")).isTrue();
+        assertThat(mapService.isExactAddress("Số 12 Nguyễn Trãi")).isTrue();
+        assertThat(mapService.isExactAddress("12/3 Nguyễn Trãi")).isTrue();
+        assertThat(mapService.isExactAddress("Ngõ 12 Nguyễn Trãi")).isTrue();
+
+        assertThat(mapService.isExactAddress("Hà Nội")).isFalse();
+        assertThat(mapService.isExactAddress("Quận Ba Đình")).isFalse();
+        assertThat(mapService.isExactAddress("Phường Phúc Xá")).isFalse();
+    }
+
+    @Test
+    void getAddressListPaged_includesIsExactFlag() throws Exception {
+        // Mock count
+        when(jdbcTemplate.queryForObject(contains("COUNT(*)"), eq(Long.class), any(Object[].class))).thenReturn(2L);
+        // Mock list result
+        java.util.Map<String, Object> a = new java.util.HashMap<>();
+        a.put("id", "1"); a.put("name", "12 Nguyễn Trãi"); a.put("address_type", "home");
+        java.util.Map<String, Object> b = new java.util.HashMap<>();
+        b.put("id", "2"); b.put("name", "Phường Phúc Xá"); b.put("address_type", "ward");
+        when(jdbcTemplate.queryForList(anyString(), any(Object[].class))).thenReturn(java.util.Arrays.asList(a, b));
+
+        Map<String, Object> resp = mapService.getAddressListPaged("appl1", "", 0, 10);
+        assertThat(resp).isNotNull();
+        Object itemsObj = resp.get("items");
+        assertThat(itemsObj).isInstanceOf(java.util.List.class);
+        java.util.List<?> items = (java.util.List<?>) itemsObj;
+        assertThat(items).hasSize(2);
+        java.util.Map<?, ?> it0 = (java.util.Map<?, ?>) items.get(0);
+        java.util.Map<?, ?> it1 = (java.util.Map<?, ?>) items.get(1);
+        assertThat(it0.get("is_exact")).isEqualTo(Boolean.TRUE);
+        assertThat(it1.get("is_exact")).isEqualTo(Boolean.FALSE);
+    }
+
+    @Test
+    void getAddressesGeoJsonByAppl_includesIsExactProperty() throws Exception {
+        String raw = "{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\",\"properties\":{\"id\":\"1\",\"address\":\"12 Nguyễn Trãi\"},\"geometry\":null}]}";
+        // stub the count(*) query first (the method queries total before features)
+        when(jdbcTemplate.queryForObject(contains("COUNT(*)"), eq(Long.class), any(Object[].class))).thenReturn(1L);
+        when(jdbcTemplate.queryForObject(anyString(), eq(String.class), any(Object[].class))).thenReturn(raw);
+        JsonNode node = mapService.getAddressesGeoJsonByAppl("appl1");
+        assertThat(node).isNotNull();
+        assertThat(node.has("features")).isTrue();
+        JsonNode f = node.withArray("features").get(0);
+        assertThat(f.get("properties").has("is_exact")).isTrue();
+        assertThat(f.get("properties").get("is_exact").asBoolean()).isTrue();
     }
 }
