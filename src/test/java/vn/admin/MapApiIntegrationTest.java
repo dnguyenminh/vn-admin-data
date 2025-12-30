@@ -10,21 +10,25 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(classes = vn.admin.web.MapApplication.class, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
+@org.springframework.test.context.ActiveProfiles("test")
 public class MapApiIntegrationTest {
 
-    // Use a PostGIS-enabled image. Adjust tag if needed.
-    @org.testcontainers.junit.jupiter.Container
-    static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>("postgis/postgis:15-3.3")
-                    .withDatabaseName("testdb")
-                    .withUsername("test")
-                    .withPassword("test");
+        // Use a PostGIS-enabled image. Declare it as compatible with the postgres image
+        // so Testcontainers will allow using the PostGIS image as a postgres substitute.
+        private static final DockerImageName POSTGIS_IMAGE = DockerImageName.parse("postgis/postgis:15-3.3").asCompatibleSubstituteFor("postgres");
+
+        @org.testcontainers.junit.jupiter.Container
+        static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(POSTGIS_IMAGE)
+            .withDatabaseName("testdb")
+            .withUsername("test")
+            .withPassword("test");
 
     @DynamicPropertySource
     static void setDatasourceProperties(DynamicPropertyRegistry registry) {
@@ -33,6 +37,8 @@ public class MapApiIntegrationTest {
         registry.add("spring.datasource.password", POSTGRES::getPassword);
         // Let Hibernate auto-ddl be disabled for this test; we'll create minimal schema manually
         registry.add("spring.jpa.hibernate.ddl-auto", () -> "none");
+        // Increase logging for web layer to capture serialization errors in tests
+        registry.add("logging.level.org.springframework.web", () -> "DEBUG");
     }
 
     @LocalServerPort
@@ -43,6 +49,11 @@ public class MapApiIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private vn.admin.service.MapService mapService;
+    @Autowired
+    private com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @BeforeAll
     static void beforeAll() {
@@ -83,7 +94,8 @@ public class MapApiIntegrationTest {
             """);
 
         // Insert a simple polygon (small square) as MULTIPOLYGON covering a tiny area
-        String polyWkt = "MULTIPOLYGON((((-0.001 0.0, -0.001 0.001, 0.001 0.001, 0.001 0.0, -0.001 0.0))))";
+        // Use a simple, unambiguous MULTIPOLYGON WKT to avoid parser differences across PostGIS versions
+        String polyWkt = "MULTIPOLYGON(((0 0, 0 1, 1 1, 1 0, 0 0)))";
         jdbcTemplate.update("INSERT INTO vn_provinces (province_id, name_vn, geom_boundary) VALUES (?, ?, ST_Multi(ST_GeomFromText(?, 4326))) ON CONFLICT DO NOTHING", "P1", "Province One", polyWkt);
         jdbcTemplate.update("INSERT INTO vn_districts (district_id, province_id, name_vn, geom_boundary) VALUES (?, ?, ?, ST_Multi(ST_GeomFromText(?, 4326))) ON CONFLICT DO NOTHING", "D1", "P1", "District One", polyWkt);
         jdbcTemplate.update("INSERT INTO vn_wards (ward_id, district_id, name_vn, geom_boundary) VALUES (?, ?, ?, ST_Multi(ST_GeomFromText(?, 4326))) ON CONFLICT DO NOTHING", "W1", "D1", "Ward One", polyWkt);
@@ -95,7 +107,19 @@ public class MapApiIntegrationTest {
 
         // Call districts geojson for province P1
         String districtsGeoUrl = "http://localhost:" + port + "/api/map/districts/geojson?provinceId=P1";
-        var geoResp = restTemplate.getForObject(districtsGeoUrl, String.class);
+        // Sanity check: call service directly to see if SQL/JSON generation works
+        var svcJson = mapService.getDistrictsGeoJsonByProvince("P1");
+        assertThat(svcJson).isNotNull();
+        assertThat(svcJson.toString()).contains("FeatureCollection");
+
+        // Ensure the application's ObjectMapper can serialize the node returned by the service
+        String serialized = objectMapper.writeValueAsString(svcJson);
+        assertThat(serialized).contains("FeatureCollection");
+
+        var districtsEntity = restTemplate.getForEntity(districtsGeoUrl, String.class);
+        // If the call failed, include the status and body in the assertion message to aid debugging
+        assertThat(districtsEntity.getStatusCode().is2xxSuccessful()).as("districts geojson response: %s", districtsEntity).isTrue();
+        var geoResp = districtsEntity.getBody();
         assertThat(geoResp).isNotNull();
         assertThat(geoResp).contains("FeatureCollection");
 
@@ -143,7 +167,9 @@ public class MapApiIntegrationTest {
         var addrs = restTemplate.getForObject(base + "/addresses?applId=C1", Object.class);
         assertThat(addrs).isNotNull();
 
-        String addrGeo = restTemplate.getForObject(base + "/addresses/geojson?applId=C1", String.class);
+        var addrEntity = restTemplate.getForEntity(base + "/addresses/geojson?applId=C1", String.class);
+        assertThat(addrEntity.getStatusCode().is2xxSuccessful()).as("addresses geojson response: %s", addrEntity).isTrue();
+        String addrGeo = addrEntity.getBody();
         assertThat(addrGeo).isNotNull();
         assertThat(addrGeo).contains("FeatureCollection");
 

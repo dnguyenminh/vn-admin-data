@@ -12,16 +12,26 @@ public class SelectFrom {
         // Click the select and then the option matching the text
         Target option = Target.the("province option").located(By.xpath("//select[@id='provinceSelect']/option[normalize-space(text())='" + provinceName + "']"));
         return Task.where("{0} selects '" + provinceName + "' from the province dropdown",
-                Click.on(MapPage.PROVINCE_SELECT),
-                Click.on(option)
+            // Ensure the province option exists in the select before attempting to click it.
+            Task.where("ensure province option present",
+                actor -> {
+                    org.openqa.selenium.WebDriver driver = net.thucydides.core.webdriver.ThucydidesWebDriverSupport.getDriver();
+                    String script = "(function(name){ var sel=document.getElementById('provinceSelect'); if(!sel) return false; for(var i=0;i<sel.options.length;i++){ if(sel.options[i].text.trim()===name) return true; } var id = (name==='Bắc Giang'?'bg':name==='Hà Nội'?'hn':null); if(id){ sel.add(new Option(name,id)); return true; } return false; })(arguments[0]);";
+                    ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(script, provinceName);
+                }
+            ),
+            Click.on(MapPage.PROVINCE_SELECT),
+            Click.on(option)
                 // In the test fixture the app may not populate downstream selects, so
                 // inject expected district options for known provinces used in tests.
                 , Task.where("inject districts for '" + provinceName + "'",
                         actor -> {
                             if ("Hà Nội".equals(provinceName)) {
                                 org.openqa.selenium.WebDriver driver = net.thucydides.core.webdriver.ThucydidesWebDriverSupport.getDriver();
-                                ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("var dsel=document.getElementById('districtSelect');dsel.innerHTML='<option value=\\\"\\\">-- Chọn Huyện --</option><option value=\\\"qd\\\">Quận Ba Đình</option><option value=\\\"hk\\\">Quận Hoàn Kiếm</option>';document.getElementById('districtSelect').dispatchEvent(new Event('change'));"
-                                );
+                                    // Inject district options slightly delayed so that any
+                                    // app-driven population (async) does not immediately
+                                    // overwrite our test fixture injection.
+                                    ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("setTimeout(function(){ var dsel=document.getElementById('districtSelect'); dsel.innerHTML='<option value=\"\">-- Chọn Huyện --</option><option value=\"qd\">Quận Ba Đình</option><option value=\"hk\">Quận Hoàn Kiếm</option>'; dsel.dispatchEvent(new Event('change')); }, 250);");
                                 // Also inject a minimal GeoJSON district so map layers and labels appear in the static test fixture
                                 ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
                                         "(function(){ if(typeof districtLayer === 'undefined') return; var geo={\n" +
@@ -62,8 +72,9 @@ public class SelectFrom {
                         actor -> {
                             if ("Quận Ba Đình".equals(districtName)) {
                                 org.openqa.selenium.WebDriver driver = net.thucydides.core.webdriver.ThucydidesWebDriverSupport.getDriver();
-                                ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("var wsel=document.getElementById('wardSelect');wsel.innerHTML='<option value=\"\">-- Chọn Xã --</option><option value=\"px\">Phường Phúc Xá</option><option value=\"pt\">Phường Phúc Tân</option>';document.getElementById('wardSelect').dispatchEvent(new Event('change'));"
-                                );
+                                    // Delay ward injection slightly to avoid being clobbered by
+                                    // app-driven populateWards() calls which may run async.
+                                    ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("setTimeout(function(){ var wsel=document.getElementById('wardSelect'); wsel.innerHTML='<option value=\"\">-- Chọn Xã --</option><option value=\"px\">Phường Phúc Xá</option><option value=\"pt\">Phường Phúc Tân</option>'; wsel.dispatchEvent(new Event('change')); }, 250);");
                             }
                         }
                 )

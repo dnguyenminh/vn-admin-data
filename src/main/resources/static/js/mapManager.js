@@ -54,6 +54,23 @@ export default class MapManager {
     showAddressesGeojson(geojson) {
         this.addressLayer.clearLayers();
         this.addressLayer.addData(geojson);
+        // Bind popup for each address feature to show details and location
+        this.addressLayer.eachLayer(l => {
+            try {
+                const p = l.feature && l.feature.properties ? l.feature.properties : {};
+                const ll = l.getLatLng ? l.getLatLng() : null;
+                const lat = ll ? ll.lat : null;
+                const lng = ll ? ll.lng : null;
+                const appl = p.appl_id || '';
+                const addr = p.address || p.name || '';
+                const atype = p.address_type || '';
+                const loc = (lat !== null && lng !== null) ? `(${lat.toFixed(6)}, ${lng.toFixed(6)})` : '';
+                const html = `<div><strong>appl_id:</strong> ${appl}<br/><strong>address:</strong> ${addr}<br/><strong>address_type:</strong> ${atype}<br/><strong>location(lat, long):</strong> ${loc}</div>`;
+                l.bindPopup(html);
+            } catch (e) {
+                // ignore
+            }
+        });
         // center map to addresses if there is at least one feature
         if (this.addressLayer.getLayers().length > 0) {
             const bounds = this.addressLayer.getBounds();
@@ -140,14 +157,42 @@ export default class MapManager {
         // geojson features expected to have properties: id, fc_id, customer_address_id, checkin_date
         this.clearCheckins();
         const onEach = (feature, layer) => {
-            const p = feature.properties || {};
-            layer.bindPopup(`<div><strong>fc_id:</strong> ${p.fc_id || ''}<br/><strong>addr_id:</strong> ${p.customer_address_id || ''}<br/><strong>date:</strong> ${p.checkin_date || ''}</div>`);
+            // Popup content created in pointToLayer where distance and precise coords are available
         };
         const pointToLayer = (feature, latlng) => {
             const fc = (feature.properties && feature.properties.fc_id) || '';
             const color = this._getColorForFc(fc);
             const marker = L.circleMarker(latlng, { radius: 6, color, fillColor: color, fillOpacity: 0.9 });
             marker.featureProps = feature.properties || {};
+            // Build a richer popup including location and distance to the linked address if available
+            try {
+                const p = marker.featureProps || {};
+                const lat = latlng.lat;
+                const lng = latlng.lng;
+                let html = `<div><strong>fc_id:</strong> ${p.fc_id || ''}<br/><strong>location(lat, long):</strong> (${lat.toFixed(6)}, ${lng.toFixed(6)})<br/>`;
+                // attempt to compute distance to customer address point if present
+                if (p.customer_address_id) {
+                    let addrLatLng = null;
+                    this.addressLayer.eachLayer(al => {
+                        try {
+                            const aid = al.feature && al.feature.properties && al.feature.properties.id;
+                            if (String(aid) === String(p.customer_address_id)) {
+                                if (al.getLatLng) addrLatLng = al.getLatLng();
+                            }
+                        } catch (e) { }
+                    });
+                    if (addrLatLng) {
+                        const dist = Math.round(latlng.distanceTo(addrLatLng));
+                        html += `<strong>distance (m):</strong> ${dist}<br/>`;
+                    }
+                }
+                html += `<strong>date:</strong> ${p.checkin_date || ''}</div>`;
+                marker.bindPopup(html);
+            } catch (e) {
+                // fallback: basic popup
+                const p = marker.featureProps || {};
+                marker.bindPopup(`<div><strong>fc_id:</strong> ${p.fc_id || ''}<br/><strong>addr_id:</strong> ${p.customer_address_id || ''}<br/><strong>date:</strong> ${p.checkin_date || ''}</div>`);
+            }
             this._allCheckinMarkers.push(marker);
             return marker;
         };

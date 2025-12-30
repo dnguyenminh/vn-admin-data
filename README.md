@@ -33,6 +33,8 @@ Run the app in development mode (enables dev-only features such as redirecting `
 ./gradlew bootRun -Dspring.profiles.active=dev
 
 # NOTE: ensure your Nuxt dev server is running (default: http://localhost:3001)
+
+**Dev profile note:** when running with the `dev` profile (`-Dspring.profiles.active=dev` or `SPRING_PROFILES_ACTIVE=dev`), Flyway is configured to run `baselineOnMigrate=true` for local convenience so existing local databases without a `flyway_schema_history` table will be baselined automatically. This makes `bootRun` easier to start against a pre-populated development database; do not use this setting for production databases without understanding the implications.
 ```
 
 Start both backend (dev profile) and frontend together (convenience):
@@ -198,6 +200,13 @@ COPY (
 ---
 
 ## Tính diện tích (area) và cập nhật vào H2
+
+
+## Database performance: customer listing
+
+If you observe slow `/api/map/customers` calls (especially for substring searches), there is a migration that creates a small `customers` table with indexes to provide fast, deduplicated listings and fast search.
+
+See `scripts/migrations/001_create_customers.sql` and `scripts/migrations/README.md` for details on applying the migration and validation steps.
 
 Nếu bạn muốn tính diện tích các đơn vị hành chính (tỉnh/huyện) và **cập nhật** giá trị vào H2 (`level1_provinces`/`level2_districts`), làm theo các bước sau:
 

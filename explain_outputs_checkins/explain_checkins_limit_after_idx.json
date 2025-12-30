@@ -1,0 +1,83 @@
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ [                                                                         +
+   {                                                                       +
+     "Plan": {                                                             +
+       "Node Type": "Limit",                                               +
+       "Parallel Aware": false,                                            +
+       "Async Capable": false,                                             +
+       "Startup Cost": 0.56,                                               +
+       "Total Cost": 129.10,                                               +
+       "Plan Rows": 31,                                                    +
+       "Plan Width": 4,                                                    +
+       "Actual Startup Time": 0.077,                                       +
+       "Actual Total Time": 0.085,                                         +
+       "Actual Rows": 2,                                                   +
+       "Actual Loops": 1,                                                  +
+       "Output": ["id"],                                                   +
+       "Shared Hit Blocks": 0,                                             +
+       "Shared Read Blocks": 6,                                            +
+       "Shared Dirtied Blocks": 0,                                         +
+       "Shared Written Blocks": 0,                                         +
+       "Local Hit Blocks": 0,                                              +
+       "Local Read Blocks": 0,                                             +
+       "Local Dirtied Blocks": 0,                                          +
+       "Local Written Blocks": 0,                                          +
+       "Temp Read Blocks": 0,                                              +
+       "Temp Written Blocks": 0,                                           +
+       "Plans": [                                                          +
+         {                                                                 +
+           "Node Type": "Index Only Scan",                                 +
+           "Parent Relationship": "Outer",                                 +
+           "Parallel Aware": false,                                        +
+           "Async Capable": false,                                         +
+           "Scan Direction": "Forward",                                    +
+           "Index Name": "idx_checkin_applid_id_nonnull_loc",              +
+           "Relation Name": "checkin_address",                             +
+           "Schema": "public",                                             +
+           "Alias": "checkin_address",                                     +
+           "Startup Cost": 0.56,                                           +
+           "Total Cost": 129.10,                                           +
+           "Plan Rows": 31,                                                +
+           "Plan Width": 4,                                                +
+           "Actual Startup Time": 0.075,                                   +
+           "Actual Total Time": 0.082,                                     +
+           "Actual Rows": 2,                                               +
+           "Actual Loops": 1,                                              +
+           "Output": ["id"],                                               +
+           "Index Cond": "(checkin_address.appl_id = '00-90-84-48'::text)",+
+           "Rows Removed by Index Recheck": 0,                             +
+           "Heap Fetches": 2,                                              +
+           "Shared Hit Blocks": 0,                                         +
+           "Shared Read Blocks": 6,                                        +
+           "Shared Dirtied Blocks": 0,                                     +
+           "Shared Written Blocks": 0,                                     +
+           "Local Hit Blocks": 0,                                          +
+           "Local Read Blocks": 0,                                         +
+           "Local Dirtied Blocks": 0,                                      +
+           "Local Written Blocks": 0,                                      +
+           "Temp Read Blocks": 0,                                          +
+           "Temp Written Blocks": 0                                        +
+         }                                                                 +
+       ]                                                                   +
+     },                                                                    +
+     "Planning": {                                                         +
+       "Shared Hit Blocks": 107,                                           +
+       "Shared Read Blocks": 29,                                           +
+       "Shared Dirtied Blocks": 0,                                         +
+       "Shared Written Blocks": 0,                                         +
+       "Local Hit Blocks": 0,                                              +
+       "Local Read Blocks": 0,                                             +
+       "Local Dirtied Blocks": 0,                                          +
+       "Local Written Blocks": 0,                                          +
+       "Temp Read Blocks": 0,                                              +
+       "Temp Written Blocks": 0                                            +
+     },                                                                    +
+     "Planning Time": 0.809,                                               +
+     "Triggers": [                                                         +
+     ],                                                                    +
+     "Execution Time": 0.116                                               +
+   }                                                                       +
+ ]
+(1 row)
+

@@ -76,6 +76,9 @@
         .search-item:hover {
             background-color: #e7f1ff;
         }
+        .search-item.focused {
+            background-color: #e7f1ff;
+        }
 
         select {
             padding: 10px;
@@ -117,15 +120,18 @@
         <select id="wardSelect">
             <option value="">-- Chọn Xã --</option>
         </select>
-        <select id="customerSelect">
-            <option value="">-- Chọn Khách hàng (appl_id) --</option>
-        </select>
-        <select id="addressSelect">
-            <option value="">-- Chọn Địa chỉ --</option>
-        </select>
-        <select id="fcSelect">
-            <option value="">-- Chọn Field Collector (fc_id) --</option>
-        </select>
+        <div class="customer-combobox" style="position:relative;">
+            <input type="text" id="customerCombo" placeholder="Chọn Khách hàng (appl_id)..." autocomplete="off" style="padding:8px;border-radius:5px;border:1px solid #ddd;min-width:220px;font-family:monospace;">
+            <div id="customerResults" class="search-results" style="display:none; position:absolute; top:40px; left:0; width:320px; z-index:10000;"></div>
+        </div>
+        <div class="address-combobox" style="position:relative;">
+            <input type="text" id="addressCombo" placeholder="Chọn Địa chỉ..." autocomplete="off" style="padding:8px;border-radius:5px;border:1px solid #ddd;min-width:300px;font-family:monospace;">
+            <div id="addressResults" class="search-results" style="display:none; position:absolute; top:40px; left:0; width:420px; z-index:10000;"></div>
+        </div>
+        <div class="fc-combobox" style="position:relative;">
+            <input type="text" id="fcCombo" placeholder="Chọn Field Collector (fc_id)..." autocomplete="off" style="padding:8px;border-radius:5px;border:1px solid #ddd;min-width:220px;font-family:monospace;">
+            <div id="fcResults" class="search-results" style="display:none; position:absolute; top:40px; left:0; width:320px; z-index:10000;"></div>
+        </div>
     </div>
     <div id="map"></div>
 

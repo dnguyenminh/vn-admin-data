@@ -35,28 +35,52 @@ export default class ApiClient {
     }
 
     static async getCustomers() {
-        const res = await fetch('/api/map/customers');
+        return this.getCustomersPage('', 0, 50);
+    }
+
+    static async getCustomersPage(q = '', page = 0, size = 50) {
+        const qParam = q ? `&q=${encodeURIComponent(q)}` : '';
+        const res = await fetch(`/api/map/customers?page=${page}&size=${size}${qParam}`);
         return res.json();
     }
 
-    static async getAddresses(applId) {
-        const res = await fetch(`/api/map/addresses?applId=${encodeURIComponent(applId)}`);
+    static async getCustomersAfter(after = '', q = '', size = 50) {
+        const qParam = q ? `&q=${encodeURIComponent(q)}` : '';
+        const afterParam = after ? `&after=${encodeURIComponent(after)}` : '';
+        const res = await fetch(`/api/map/customers?size=${size}${afterParam}${qParam}`);
         return res.json();
     }
 
-    static async getAddressesGeoJson(applId) {
-        const res = await fetch(`/api/map/addresses/geojson?applId=${encodeURIComponent(applId)}`);
+    static async getAddresses(applId, q = '', page = 0, size = 50) {
+        const qParam = q ? `&q=${encodeURIComponent(q)}` : '';
+        const res = await fetch(`/api/map/addresses?applId=${encodeURIComponent(applId)}&page=${page}&size=${size}${qParam}`);
         return res.json();
     }
 
-    static async getCheckinsGeoJson(applId, fcId = '') {
+    static async getAddressesPage(applId, q = '', page = 0, size = 50) {
+        return this.getAddresses(applId, q, page, size);
+    }
+
+    static async getAddressesGeoJson(applId, page = null, size = null) {
+        const pageParam = (page !== null && size !== null) ? `&page=${page}&size=${size}` : '';
+        const res = await fetch(`/api/map/addresses/geojson?applId=${encodeURIComponent(applId)}${pageParam}`);
+        return res.json();
+    }
+
+    static async getCheckinsGeoJson(applId, fcId = '', page = null, size = null) {
         const fcParam = fcId ? `&fcId=${encodeURIComponent(fcId)}` : '';
-        const res = await fetch(`/api/map/checkins/geojson?applId=${encodeURIComponent(applId)}${fcParam}`);
+        const pageParam = (page !== null && size !== null) ? `&page=${page}&size=${size}` : '';
+        const res = await fetch(`/api/map/checkins/geojson?applId=${encodeURIComponent(applId)}${fcParam}${pageParam}`);
         return res.json();
     }
 
     static async getCheckinFcIds(applId) {
-        const res = await fetch(`/api/map/checkins/fcids?applId=${encodeURIComponent(applId)}`);
+        return this.getCheckinFcIdsPage(applId, '', 0, 50);
+    }
+
+    static async getCheckinFcIdsPage(applId, q = '', page = 0, size = 50) {
+        const qParam = q ? `&q=${encodeURIComponent(q)}` : '';
+        const res = await fetch(`/api/map/checkins/fcids?applId=${encodeURIComponent(applId)}&page=${page}&size=${size}${qParam}`);
         return res.json();
     }
 }

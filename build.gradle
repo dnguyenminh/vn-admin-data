@@ -34,6 +34,8 @@ dependencies {
     // 2. Database & PostGIS (Bắt buộc phải có bản mới để khớp Hibernate 6)
     implementation 'org.postgresql:postgresql:42.7.4'
     implementation 'org.hibernate.orm:hibernate-spatial:6.6.1.Final'
+    // Database migrations
+    implementation 'org.flywaydb:flyway-core:9.20.1'
     // Embedded H2 for local testing and H2Launcher
     // implementation 'com.h2database:h2:2.2.220'
     

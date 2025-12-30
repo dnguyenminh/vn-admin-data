@@ -24,9 +24,8 @@ export default class App {
         this.ui.pSel.onchange = () => this.handleProvinceChange(this.ui.pSel.value);
         this.ui.dSel.onchange = () => this.handleDistrictChange(this.ui.dSel.value);
         this.ui.wSel.onchange = () => this.handleWardChange(this.ui.wSel.value);
-        this.ui.cSel.onchange = () => this.handleCustomerChange(this.ui.cSel.value);
-        this.ui.aSel.onchange = () => this.handleAddressChange(this.ui.aSel.value);
-        this.ui.fcSel.onchange = () => this.handleFcChange(this.ui.fcSel.value);
+        // Comboboxes (customer/address/fc) are handled by their own bind methods in _init();
+        // keep province/district/ward onchange handlers above.
     }
 
     async handleWardChange(wid) {
@@ -47,9 +46,121 @@ export default class App {
         console.log('App initialized');
         const provinces = await this.api.getProvinces();
         this.ui.populateProvinces(provinces);
-        // populate customers
-        const customers = await this.api.getCustomers();
-        this.ui.populateCustomers(customers);
+        // setup customers combobox (single control)
+        this.customersPage = 0;
+        this.customersQ = '';
+        this.customersSize = 50;
+        // Preload first page using keyset pagination (avoids expensive COUNT/OFFSET)
+        const first = await this.api.getCustomersAfter('', '', this.customersSize);
+        this.customersAfter = first.after || null;
+        this.ui.showCustomerResults(first, false);
+
+        this.ui.bindCustomerCombo(
+            // onQuery
+            async (q, page) => {
+                const p = (page === undefined || page === null) ? 0 : page;
+                // For fresh queries request first page via keyset (no COUNT/OFFSET)
+                const resp = await this.api.getCustomersAfter('', q, this.customersSize);
+                this.customersQ = q;
+                this.customersPage = resp.page || p;
+                this.customersAfter = resp.after || null;
+                this.ui.showCustomerResults(resp, p > 0);
+            },
+            // onSelect
+            (item) => {
+                this.selectedCustomerId = item.id;
+                this.handleCustomerChange(item.id);
+            },
+            // onLoadMore
+            async () => {
+                // If we have a keyset cursor, use it; otherwise fall back to page
+                if (this.customersAfter) {
+                    const resp = await this.api.getCustomersAfter(this.customersAfter, this.customersQ || '', this.customersSize);
+                    this.customersAfter = resp.after || null;
+                    this.ui.showCustomerResults(resp, true);
+                } else {
+                    const next = (this.customersPage || 0) + 1;
+                    const resp = await this.api.getCustomersPage(this.customersQ || '', next, this.customersSize);
+                    this.customersPage = resp.page || next;
+                    this.customersAfter = resp.after || null;
+                    this.ui.showCustomerResults(resp, true);
+                }
+            }
+        );
+        // bind address combobox
+        this.addressesPage = 0;
+        this.addressesQ = '';
+        this.addressesSize = 50;
+        this.ui.bindAddressCombo(
+            async (q, page) => {
+                const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+                if (!applId) return;
+                const p = (page === undefined || page === null) ? 0 : page;
+                const resp = await this.api.getAddressesPage(applId, q, p, this.addressesSize);
+                this.addressesQ = q;
+                this.addressesPage = resp.page || p;
+                this.ui.showAddressResults(resp, p > 0);
+            },
+            // onSelect
+            (item) => { this.selectedAddressId = item.id; this.handleAddressChange(item.id); },
+            // onLoadMore
+            async () => {
+                const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+                if (!applId) return;
+                const next = (this.addressesPage || 0) + 1;
+                const resp = await this.api.getAddressesPage(applId, this.addressesQ || '', next, this.addressesSize);
+                this.addressesPage = resp.page || next;
+                this.ui.showAddressResults(resp, true);
+            }
+        );
+
+        // bind fc combobox (populated when customer selected)
+        this.fcPage = 0;
+        this.fcQ = '';
+        this.fcSize = 50;
+        this.ui.bindFcCombo(
+            async (q, page) => {
+                const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+                if (!applId) return;
+                const p = (page === undefined || page === null) ? 0 : page;
+                const resp = await this.api.getCheckinFcIdsPage(applId, q, p, this.fcSize);
+                this.fcQ = q;
+                this.fcPage = resp.page || p;
+                this.ui.showFcResults(resp, p > 0);
+            },
+            (item) => { this.selectedFcId = item.id; this.handleFcChange(item.id); },
+            async () => {
+                const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+                if (!applId) return;
+                const next = (this.fcPage || 0) + 1;
+                const resp = await this.api.getCheckinFcIdsPage(applId, this.fcQ || '', next, this.fcSize);
+                this.fcPage = resp.page || next;
+                this.ui.showFcResults(resp, true);
+            }
+        );
+    }
+
+    async loadCustomersPage(q, page) {
+        // Use keyset 'after' cursor if present to avoid OFFSET costs
+        if (this.customersAfter) {
+            const resp = await this.api.getCustomersAfter(this.customersAfter, q, this.customersSize);
+            this.customersAfter = resp.after || null;
+            this.ui.populateCustomers(resp);
+            return resp;
+        }
+        const resp = await this.api.getCustomersPage(q, page, this.customersSize);
+        this.customersPage = resp.page || page;
+        this.customersAfter = resp.after || null;
+        this.customersTotal = resp.total || 0;
+        this.ui.populateCustomers(resp);
+        return resp;
+    }
+
+    async loadAddressesPage(applId, q, page) {
+        const resp = await this.api.getAddresses(applId, q, page, this.addressesSize || 50);
+        this.addressesPage = resp.page || page;
+        this.addressesTotal = resp.total || 0;
+        this.ui.populateAddresses(resp);
     }
 
     async handleCustomerChange(applId) {
@@ -61,14 +172,16 @@ export default class App {
             this.map.clearCheckins();
             return;
         }
+        // load first page of addresses and checkins for this customer
+        this.addressesPage = 0;
+        this.addressesQ = '';
+        const addressesResp = await this.api.getAddresses(applId, this.addressesQ, 0, this.addressesSize || 50);
+        this.ui.populateAddresses(addressesResp);
 
-        const addresses = await this.api.getAddresses(applId);
-        this.ui.populateAddresses(addresses);
-
-        const addrGeo = await this.api.getAddressesGeoJson(applId);
+        const addrGeo = await this.api.getAddressesGeoJson(applId, 0, this.addressesSize || 50);
         this.map.showAddressesGeojson(addrGeo);
 
-        const checkinsGeo = await this.api.getCheckinsGeoJson(applId);
+        const checkinsGeo = await this.api.getCheckinsGeoJson(applId, '', 0, 1000); // page checkins with reasonable default
         this.map.showCheckinsGeojson(checkinsGeo);
 
         const fcids = await this.api.getCheckinFcIds(applId);
@@ -78,7 +191,8 @@ export default class App {
     async handleAddressChange(addrId) {
         if (!addrId) {
             // show all checkins
-            this.map.filterCheckinsByFcId(this.ui.fcSel.value || '');
+            const fcId = this.selectedFcId || this.ui.getSelectedFcId();
+            this.map.filterCheckinsByFcId(fcId || '');
             return;
         }
         // Highlight and center address
