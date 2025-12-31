@@ -507,10 +507,12 @@ public class MapService {
                     for (JsonNode f : root.withArray("features")) {
                         try {
                             JsonNode props = f.get("properties");
-                            if (props != null && props.has("address")) {
+                                if (props != null && props.has("address")) {
                                 String a = props.get("address").asText(null);
                                 ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("is_exact", isExactAddress(a));
-                            }
+                                // ensure appl_id is present on each feature so UI tooltips show the application id
+                                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("appl_id", applId);
+                                }
                         } catch (Exception e) { /* ignore per-feature */ }
                     }
                 }
@@ -532,6 +534,8 @@ public class MapService {
                                 if (props != null && props.has("address")) {
                                     String a = props.get("address").asText(null);
                                     ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("is_exact", isExactAddress(a));
+                                    // ensure appl_id is present on each feature so UI tooltips show the application id
+                                    ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("appl_id", applId);
                                 }
                             } catch (Exception e) { /* ignore per-feature */ }
                         }
@@ -694,7 +698,9 @@ public class MapService {
     public com.fasterxml.jackson.databind.JsonNode predictAddressLocation(String applId, String addressId) {
         try {
             // Compute centroid of checkins for this customer address id
-            String csql = "SELECT ST_AsGeoJSON(ST_Centroid(ST_Collect(ST_SetSRID(ST_Point(field_long::double precision, field_lat::double precision),4326)))) FROM checkin_address WHERE customer_address_id = ?";
+            // Accept addressId passed as text by casting to integer so controller request params (strings)
+            // work without causing "integer = character varying" errors in some Postgres setups.
+            String csql = "SELECT ST_AsGeoJSON(ST_Centroid(ST_Collect(ST_SetSRID(ST_Point(field_long::double precision, field_lat::double precision),4326)))) FROM checkin_address WHERE customer_address_id = ?::int";
             String centroidRaw = jdbcTemplate.queryForObject(csql, String.class, addressId);
             if (centroidRaw == null) return NullNode.instance;
 
@@ -750,7 +756,8 @@ public class MapService {
             feature.put("type", "Feature");
             feature.set("geometry", objectMapper.readTree(predictedGeoJson));
             com.fasterxml.jackson.databind.node.ObjectNode props = objectMapper.createObjectNode();
-            props.put("applId", applId);
+            // Use snake_case property name for consistency with other feature props used by the UI
+            props.put("appl_id", applId);
             props.put("addressId", addressId);
             props.put("adjusted", adjusted);
             props.put("areaLevel", areaLevel == null ? "" : areaLevel);

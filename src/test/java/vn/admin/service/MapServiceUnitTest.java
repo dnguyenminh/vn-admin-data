@@ -114,6 +114,9 @@ public class MapServiceUnitTest {
         JsonNode f = node.withArray("features").get(0);
         assertThat(f.get("properties").has("is_exact")).isTrue();
         assertThat(f.get("properties").get("is_exact").asBoolean()).isTrue();
+        // appl_id should be present and equal to the requested application id
+        assertThat(f.get("properties").has("appl_id")).isTrue();
+        assertThat(f.get("properties").get("appl_id").asText()).isEqualTo("appl1");
     }
 
     @Test
@@ -137,6 +140,7 @@ public class MapServiceUnitTest {
         assertThat(feat).isNotNull();
         assertThat(feat.get("type").asText()).isEqualTo("Feature");
         assertThat(feat.get("properties").get("adjusted").asBoolean()).isFalse();
+        assertThat(feat.get("properties").get("appl_id").asText()).isEqualTo("appl1");
     }
 
     @Test
@@ -156,5 +160,6 @@ public class MapServiceUnitTest {
         assertThat(feat).isNotNull();
         assertThat(feat.get("properties").get("adjusted").asBoolean()).isTrue();
         assertThat(feat.get("geometry").get("type").asText()).isEqualTo("Point");
+        assertThat(feat.get("properties").get("appl_id").asText()).isEqualTo("appl1");
     }
 }

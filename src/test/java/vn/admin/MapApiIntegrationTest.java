@@ -174,6 +174,16 @@ public class MapApiIntegrationTest {
         assertThat(addrGeo).contains("FeatureCollection");
         // Ensure the geojson includes the server-side is_exact property for this exact address
         assertThat(addrGeo).contains("\"is_exact\":true");
+        // Also ensure each feature includes appl_id so the UI tooltip can display the application id
+        com.fasterxml.jackson.databind.JsonNode addrRoot = objectMapper.readTree(addrGeo);
+        if (addrRoot.has("features") && addrRoot.get("features").isArray()) {
+            for (com.fasterxml.jackson.databind.JsonNode f : addrRoot.withArray("features")) {
+                com.fasterxml.jackson.databind.JsonNode props = f.get("properties");
+                assertThat(props).isNotNull();
+                assertThat(props.has("appl_id")).as("feature properties should include appl_id").isTrue();
+                assertThat(props.get("appl_id").asText()).isEqualTo("C1");
+            }
+        }
 
         // Insert a non-exact address (administrative only) with coordinates and check is_exact=false
         Integer addrId2 = jdbcTemplate.queryForObject(
@@ -183,6 +193,16 @@ public class MapApiIntegrationTest {
         String addrGeo2 = restTemplate.getForObject(base + "/addresses/geojson?applId=C2", String.class);
         assertThat(addrGeo2).isNotNull();
         assertThat(addrGeo2).contains("\"is_exact\":false");
+        // ensure appl_id present for non-exact addresses as well
+        com.fasterxml.jackson.databind.JsonNode addrRoot2 = objectMapper.readTree(addrGeo2);
+        if (addrRoot2.has("features") && addrRoot2.get("features").isArray()) {
+            for (com.fasterxml.jackson.databind.JsonNode f : addrRoot2.withArray("features")) {
+                com.fasterxml.jackson.databind.JsonNode props = f.get("properties");
+                assertThat(props).isNotNull();
+                assertThat(props.has("appl_id")).as("feature properties should include appl_id").isTrue();
+                assertThat(props.get("appl_id").asText()).isEqualTo("C2");
+            }
+        }
 
         String chkGeoAll = restTemplate.getForObject(base + "/checkins/geojson?applId=C1", String.class);
         assertThat(chkGeoAll).isNotNull();
@@ -197,5 +217,16 @@ public class MapApiIntegrationTest {
 
         var fcids = restTemplate.getForObject(base + "/checkins/fcids?applId=C1", Object.class);
         assertThat(fcids).isNotNull();
+
+        // Call predict endpoint for address id and ensure appl_id is present in returned feature properties
+        var predictEntity = restTemplate.getForEntity(base + "/addresses/predict?applId=C1&addressId=" + addrId, String.class);
+        assertThat(predictEntity.getStatusCode().is2xxSuccessful()).as("predict response: %s", predictEntity).isTrue();
+        String predBody = predictEntity.getBody();
+        assertThat(predBody).isNotNull();
+        com.fasterxml.jackson.databind.JsonNode predNode = objectMapper.readTree(predBody);
+        assertThat(predNode.has("properties")).isTrue();
+        com.fasterxml.jackson.databind.JsonNode pprops = predNode.get("properties");
+        assertThat(pprops.has("appl_id")).isTrue();
+        assertThat(pprops.get("appl_id").asText()).isEqualTo("C1");
         }
 }
