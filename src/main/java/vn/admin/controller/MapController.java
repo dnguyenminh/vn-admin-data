@@ -177,4 +177,19 @@ public class MapController {
     public Map<String, Object> reverseByAddress(@RequestParam("addressId") String addressId) {
         return mapService.reverseLookupByAddressId(addressId);
     }
+
+    @GetMapping(value = "/addresses/predict")
+    public ResponseEntity<JsonNode> predictAddressLocation(@RequestParam("applId") String applId,
+            @RequestParam("addressId") String addressId) {
+        try {
+            JsonNode json = mapService.predictAddressLocation(applId, addressId);
+            if (json == null || json.isNull()) {
+                return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(NullNode.instance);
+            }
+            return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(json);
+        } catch (Exception e) {
+            log.error("Error in predictAddressLocation for applId={}, addressId={}", applId, addressId, e);
+            throw e;
+        }
+    }
 }

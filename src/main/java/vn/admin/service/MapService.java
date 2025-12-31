@@ -680,4 +680,85 @@ public class MapService {
         String p = "%" + query + "%";
         return jdbcTemplate.queryForList(sql, p, p, p);
     }
+
+    /**
+     * Predict a customer's address location based on checkin points for the
+     * corresponding customer_address id. The method computes the centroid of
+     * all checkins linked to the provided address id and, if an administrative
+     * area can be inferred from the address string, ensures the returned point
+     * lies within that area (otherwise returns a point on surface of the area).
+     *
+     * Returns a GeoJSON Feature (Point) with properties: applId, addressId,
+     * adjusted (true if moved into the area), areaLevel (ward/district/province or empty).
+     */
+    public com.fasterxml.jackson.databind.JsonNode predictAddressLocation(String applId, String addressId) {
+        try {
+            // Compute centroid of checkins for this customer address id
+            String csql = "SELECT ST_AsGeoJSON(ST_Centroid(ST_Collect(ST_SetSRID(ST_Point(field_long::double precision, field_lat::double precision),4326)))) FROM checkin_address WHERE customer_address_id = ?";
+            String centroidRaw = jdbcTemplate.queryForObject(csql, String.class, addressId);
+            if (centroidRaw == null) return NullNode.instance;
+
+            // Attempt to infer administrative area from the address text (ward -> district -> province)
+            String addrSql = "SELECT address FROM customer_address WHERE id::text = ? LIMIT 1";
+            String addrText = null;
+            try { addrText = jdbcTemplate.queryForObject(addrSql, String.class, addressId); } catch (Exception e) { /* ignore */ }
+
+            String areaGeoJson = null;
+            String areaLevel = null;
+            if (addrText != null) {
+                try {
+                    String wardSql = "SELECT ST_AsGeoJSON(geom_boundary) FROM vn_wards WHERE ? ILIKE '%' || name_vn || '%' LIMIT 1";
+                    areaGeoJson = jdbcTemplate.queryForObject(wardSql, String.class, addrText);
+                    if (areaGeoJson != null) areaLevel = "ward";
+                } catch (Exception e) { areaGeoJson = null; }
+                if (areaGeoJson == null) {
+                    try {
+                        String distSql = "SELECT ST_AsGeoJSON(geom_boundary) FROM vn_districts WHERE ? ILIKE '%' || name_vn || '%' LIMIT 1";
+                        areaGeoJson = jdbcTemplate.queryForObject(distSql, String.class, addrText);
+                        if (areaGeoJson != null) areaLevel = "district";
+                    } catch (Exception e) { areaGeoJson = null; }
+                }
+                if (areaGeoJson == null) {
+                    try {
+                        String provSql = "SELECT ST_AsGeoJSON(geom_boundary) FROM vn_provinces WHERE ? ILIKE '%' || name_vn || '%' LIMIT 1";
+                        areaGeoJson = jdbcTemplate.queryForObject(provSql, String.class, addrText);
+                        if (areaGeoJson != null) areaLevel = "province";
+                    } catch (Exception e) { areaGeoJson = null; }
+                }
+            }
+
+            String predictedGeoJson = centroidRaw;
+            boolean adjusted = false;
+            if (areaGeoJson != null) {
+                // First check whether the centroid is already inside the inferred administrative area
+                Boolean contains = jdbcTemplate.queryForObject("SELECT ST_Contains(ST_SetSRID(ST_GeomFromGeoJSON(?),4326), ST_SetSRID(ST_GeomFromGeoJSON(?),4326))", Boolean.class, areaGeoJson, centroidRaw);
+                if (contains != null && contains) {
+                    // inside: keep centroid
+                    predictedGeoJson = centroidRaw;
+                    adjusted = false;
+                } else {
+                    // outside or unknown: compute a fallback point on the area's surface
+                    String adjSql = "SELECT ST_AsGeoJSON(ST_PointOnSurface(ST_SetSRID(ST_GeomFromGeoJSON(?),4326)))";
+                    String adj = jdbcTemplate.queryForObject(adjSql, String.class, areaGeoJson);
+                    if (adj != null) predictedGeoJson = adj;
+                    adjusted = true;
+                }
+            }
+
+            // Build GeoJSON Feature output
+            com.fasterxml.jackson.databind.node.ObjectNode feature = objectMapper.createObjectNode();
+            feature.put("type", "Feature");
+            feature.set("geometry", objectMapper.readTree(predictedGeoJson));
+            com.fasterxml.jackson.databind.node.ObjectNode props = objectMapper.createObjectNode();
+            props.put("applId", applId);
+            props.put("addressId", addressId);
+            props.put("adjusted", adjusted);
+            props.put("areaLevel", areaLevel == null ? "" : areaLevel);
+            feature.set("properties", props);
+            return feature;
+        } catch (Exception e) {
+            log.warn("predictAddressLocation failed for applId={}, addressId={}", applId, addressId, e);
+            return NullNode.instance;
+        }
+    }
 }

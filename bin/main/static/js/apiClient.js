@@ -72,6 +72,11 @@ export default class ApiClient {
         return res.json();
     }
 
+    static async getReverseForAddress(addressId) {
+        const res = await fetch(`/api/map/reverse/address?addressId=${encodeURIComponent(addressId)}`);
+        return res.json();
+    }
+
     static async getCheckinsGeoJson(applId, fcId = '', page = null, size = null) {
         const fcParam = fcId ? `&fcId=${encodeURIComponent(fcId)}` : '';
         const pageParam = (page !== null && size !== null) ? `&page=${page}&size=${size}` : '';
@@ -86,6 +91,11 @@ export default class ApiClient {
     static async getCheckinFcIdsPage(applId, q = '', page = 0, size = 50) {
         const qParam = q ? `&q=${encodeURIComponent(q)}` : '';
         const res = await fetch(`/api/map/checkins/fcids?applId=${encodeURIComponent(applId)}&page=${page}&size=${size}${qParam}`);
+        return res.json();
+    }
+
+    static async getPredictedAddress(applId, addressId) {
+        const res = await fetch(`/api/map/addresses/predict?applId=${encodeURIComponent(applId)}&addressId=${encodeURIComponent(addressId)}`);
         return res.json();
     }
 }

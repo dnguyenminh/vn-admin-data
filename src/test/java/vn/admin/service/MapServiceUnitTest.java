@@ -105,12 +105,56 @@ public class MapServiceUnitTest {
         // (PotentialStubbingProblem). Stub COUNT(*) explicitly so the flow
         // proceeds and the geojson response can be exercised.
         when(jdbcTemplate.queryForObject(contains("COUNT(*)"), eq(Long.class), any(Object[].class))).thenReturn(1L);
-        when(jdbcTemplate.queryForObject(anyString(), eq(String.class), any(Object[].class))).thenReturn(raw);
+        // no ST_Contains stub here (not used by this method)
+        // Return the feature collection JSON for the feature query
+        when(jdbcTemplate.queryForObject(startsWith("SELECT jsonb_build_object('type','FeatureCollection'"), eq(String.class), any())).thenReturn(raw);
         JsonNode node = mapService.getAddressesGeoJsonByAppl("appl1");
         assertThat(node).isNotNull();
         assertThat(node.has("features")).isTrue();
         JsonNode f = node.withArray("features").get(0);
         assertThat(f.get("properties").has("is_exact")).isTrue();
         assertThat(f.get("properties").get("is_exact").asBoolean()).isTrue();
+    }
+
+    @Test
+    void predictAddressLocation_centroid_inside_area_returns_centroid_unadjusted() throws Exception {
+        // Mock centroid from checkins
+        String centroid = "{\"type\":\"Point\",\"coordinates\":[106.0,10.0]}";
+        when(jdbcTemplate.queryForObject(contains("ST_Centroid"), eq(String.class), any())).thenReturn(centroid);
+        // Mock address text lookup
+        when(jdbcTemplate.queryForObject(contains("SELECT address FROM customer_address"), eq(String.class), any())).thenReturn("Phường Phúc Xá");
+        // Mock ward lookup success
+        String wardGeo = "{\"type\":\"Polygon\",\"coordinates\":[[[105,9],[107,9],[107,11],[105,11],[105,9]]]}";
+        when(jdbcTemplate.queryForObject(contains("vn_wards"), eq(String.class), any())).thenReturn(wardGeo);
+        // adj SQL returns a point on surface (used by the contains/adjust check)
+        String adjPoint = "{\"type\":\"Point\",\"coordinates\":[106.0,10.0]}";
+        // stub the contains check precisely (avoid varargs matching issues)
+        org.mockito.Mockito.doReturn(Boolean.TRUE).when(jdbcTemplate).queryForObject(eq("SELECT ST_Contains(ST_SetSRID(ST_GeomFromGeoJSON(?),4326), ST_SetSRID(ST_GeomFromGeoJSON(?),4326))"), eq(Boolean.class), eq(wardGeo), eq(centroid));
+        // adj SQL returns the adjusted point when needed (lenient since not used when centroid is inside)
+        org.mockito.Mockito.lenient().when(jdbcTemplate.queryForObject(startsWith("SELECT ST_AsGeoJSON(ST_PointOnSurface"), eq(String.class), org.mockito.ArgumentMatchers.any())).thenReturn(adjPoint);
+
+        com.fasterxml.jackson.databind.JsonNode feat = mapService.predictAddressLocation("appl1", "addr1");
+        assertThat(feat).isNotNull();
+        assertThat(feat.get("type").asText()).isEqualTo("Feature");
+        assertThat(feat.get("properties").get("adjusted").asBoolean()).isFalse();
+    }
+
+    @Test
+    void predictAddressLocation_centroid_outside_area_returns_adjusted_point() throws Exception {
+        String centroid = "{\"type\":\"Point\",\"coordinates\":[200.0,200.0]}";
+        when(jdbcTemplate.queryForObject(contains("ST_Centroid"), eq(String.class), any())).thenReturn(centroid);
+        when(jdbcTemplate.queryForObject(contains("SELECT address FROM customer_address"), eq(String.class), any())).thenReturn("Quận Ba Đình");
+        String districtGeo = "{\"type\":\"Polygon\",\"coordinates\":[[[105,9],[107,9],[107,11],[105,11],[105,9]]]}";
+        when(jdbcTemplate.queryForObject(contains("vn_districts"), eq(String.class), any())).thenReturn(districtGeo);
+        // contains false (precise stub)
+        org.mockito.Mockito.doReturn(Boolean.FALSE).when(jdbcTemplate).queryForObject(eq("SELECT ST_Contains(ST_SetSRID(ST_GeomFromGeoJSON(?),4326), ST_SetSRID(ST_GeomFromGeoJSON(?),4326))"), eq(Boolean.class), eq(districtGeo), eq(centroid));
+        // adj SQL returns a point on surface (point on surface uses only the area arg)
+        String adjPoint = "{\"type\":\"Point\",\"coordinates\":[106.0,10.0]}";
+        org.mockito.Mockito.doReturn(adjPoint).when(jdbcTemplate).queryForObject(startsWith("SELECT ST_AsGeoJSON(ST_PointOnSurface"), eq(String.class), eq(districtGeo));
+
+        com.fasterxml.jackson.databind.JsonNode feat = mapService.predictAddressLocation("appl1", "addr2");
+        assertThat(feat).isNotNull();
+        assertThat(feat.get("properties").get("adjusted").asBoolean()).isTrue();
+        assertThat(feat.get("geometry").get("type").asText()).isEqualTo("Point");
     }
 }
