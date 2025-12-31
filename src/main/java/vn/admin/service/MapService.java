@@ -561,14 +561,22 @@ public class MapService {
                 // If it's like 'Quận 1' (admin + number) treat as non-exact
                 return false;
             }
+            // Normalize and detect numeric/structural cues
             boolean hasNumber = s.matches(".*\\d.*");
             boolean hasHousePrefix = s.matches(".*\\b(số|so)\\s*\\d+.*");
             boolean numberWithSlash = s.matches(".*\\d+\\s*\\/\\s*\\d+.*");
-            boolean hasStreetKeyword = s.matches(".*\\b(đường|duong|phố|pho|hẻm|hem|ngõ|ngo|ngách|ngach|khu phố|khu pho)\\b.*");
-            // If we have a numeric house number and either a street word or house prefix or number/compound, consider exact
-            if (hasNumber && (hasStreetKeyword || hasHousePrefix || numberWithSlash)) return true;
-            // As a fallback, if there's a number and more text (likely a street name), consider it exact
-            if (hasNumber && s.matches(".*\\d+\\s+\\p{L}+.*")) return true;
+            // Street keywords: include explicit street/road markers but exclude alley-like tokens
+            boolean hasStreetKeyword = s.matches(".*\\b(đường|duong|phố|pho|khu phố|khu pho|đ|d)\\b.*");
+            // Alley tokens (ngõ/hẻm/ngách) are ambiguous — if the pattern is like 'ngõ 12 Nguyễn Trãi'
+            // treat as non-exact unless an explicit house prefix ('số') or a compound number is present.
+            boolean hasAlleyNumber = s.matches(".*\\b(ngõ|ngo|hẻm|hem|ngách|ngach)\\s*\\d+.*");
+
+            // Only treat an address as syntactically 'exact' when it contains a numeric house
+            // AND an explicit street token (e.g., 'đường', 'phố'). This is intentionally strict
+            // because a bare number followed by a locality name ("12 Nguyễn Trãi") may be
+            // ambiguous without admin context and should not be considered resolvable.
+            if (hasAlleyNumber) return false;
+            if (hasNumber && hasStreetKeyword) return true;
             return false;
         }
 

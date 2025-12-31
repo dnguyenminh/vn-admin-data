@@ -63,14 +63,25 @@ public class MapServiceUnitTest {
 
     @Test
     void isExactAddress_detectsHouseNumbersAndStreets() {
-        assertThat(mapService.isExactAddress("12 Nguyễn Trãi")).isTrue();
-        assertThat(mapService.isExactAddress("Số 12 Nguyễn Trãi")).isTrue();
-        assertThat(mapService.isExactAddress("12/3 Nguyễn Trãi")).isTrue();
-        assertThat(mapService.isExactAddress("Ngõ 12 Nguyễn Trãi")).isTrue();
+        // Without explicit street token these are ambiguous and should be non-exact
+        assertThat(mapService.isExactAddress("12 Nguyễn Trãi")).isFalse();
+        assertThat(mapService.isExactAddress("Số 12 Nguyễn Trãi")).isFalse();
+        assertThat(mapService.isExactAddress("12/3 Nguyễn Trãi")).isFalse();
+        // Explicit street tokens are required to consider an address exact
+        assertThat(mapService.isExactAddress("Đường Nguyễn Trãi 12")).isTrue();
+        assertThat(mapService.isExactAddress("Phố Nguyễn Trãi số 12")).isTrue();
+        // Alley expressions like 'Ngõ 12 Nguyễn Trãi' are ambiguous (alley number) and should be non-exact
+        // With the stricter heuristic (explicit street token required), this should be false
+        assertThat(mapService.isExactAddress("12 Nguyễn Trãi")).isFalse();
+
+        assertThat(mapService.isExactAddress("Ngõ 12 Nguyễn Trãi")).isFalse();
 
         assertThat(mapService.isExactAddress("Hà Nội")).isFalse();
         assertThat(mapService.isExactAddress("Quận Ba Đình")).isFalse();
         assertThat(mapService.isExactAddress("Phường Phúc Xá")).isFalse();
+
+        // Example reported by user: administrative-only address without house number
+        assertThat(mapService.isExactAddress("Đức Thắng Xã Thượng Ninh Như Xuân Tỉnh Thanh Hóa")).isFalse();
     }
 
     @Test
@@ -92,7 +103,7 @@ public class MapServiceUnitTest {
         assertThat(items).hasSize(2);
         java.util.Map<?, ?> it0 = (java.util.Map<?, ?>) items.get(0);
         java.util.Map<?, ?> it1 = (java.util.Map<?, ?>) items.get(1);
-        assertThat(it0.get("is_exact")).isEqualTo(Boolean.TRUE);
+        assertThat(it0.get("is_exact")).isEqualTo(Boolean.FALSE);
         assertThat(it1.get("is_exact")).isEqualTo(Boolean.FALSE);
     }
 
@@ -113,7 +124,8 @@ public class MapServiceUnitTest {
         assertThat(node.has("features")).isTrue();
         JsonNode f = node.withArray("features").get(0);
         assertThat(f.get("properties").has("is_exact")).isTrue();
-        assertThat(f.get("properties").get("is_exact").asBoolean()).isTrue();
+        // With the stricter heuristic an address like '12 Nguyễn Trãi' is ambiguous and should be non-exact
+        assertThat(f.get("properties").get("is_exact").asBoolean()).isFalse();
         // appl_id should be present and equal to the requested application id
         assertThat(f.get("properties").has("appl_id")).isTrue();
         assertThat(f.get("properties").get("appl_id").asText()).isEqualTo("appl1");
