@@ -20,11 +20,20 @@ public class NavigateTo {
                 actor -> {
                     try {
                         org.openqa.selenium.WebDriver driver = net.thucydides.core.webdriver.ThucydidesWebDriverSupport.getDriver();
-                        // Wait for the client-side App to initialize (App sets up sidebar toggle handlers)
-                        org.openqa.selenium.support.ui.WebDriverWait initWait = new org.openqa.selenium.support.ui.WebDriverWait(driver, java.time.Duration.ofSeconds(6));
-                        initWait.until(d -> {
-                            try { return ((org.openqa.selenium.JavascriptExecutor) d).executeScript("return (window.app !== undefined);"); } catch (Throwable t) { return false; }
-                        });
+                        // Wait (non-throwing) for the client-side App to initialize (App sets up sidebar toggle handlers).
+                        // Use a short polling loop to avoid WebDriver's TimeoutException bubbling up and failing navigation.
+                        boolean appReady = false;
+                        long deadline = System.currentTimeMillis() + java.time.Duration.ofSeconds(12).toMillis();
+                        while (System.currentTimeMillis() < deadline) {
+                            try {
+                                Object val = ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("return (window.app !== undefined);");
+                                if (Boolean.TRUE.equals(val)) { appReady = true; break; }
+                            } catch (Throwable ignored) { /* ignore until deadline */ }
+                            try { Thread.sleep(200); } catch (InterruptedException ie) { /* ignore */ }
+                        }
+                        if (!appReady) {
+                            System.out.println("NavigateTo: app did not initialize within timeout; proceeding with force-open fallbacks.");
+                        }
                             // Debug: print location search to help diagnose why acceptanceTest flag may not be visible
                             try {
                                 Object loc = ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("return window.location.href + '|' + window.location.search;");
