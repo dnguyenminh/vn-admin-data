@@ -88,4 +88,9 @@ export default class ApiClient {
         const res = await fetch(`/api/map/checkins/fcids?applId=${encodeURIComponent(applId)}&page=${page}&size=${size}${qParam}`);
         return res.json();
     }
+
+    static async getPredictedAddress(applId, addressId) {
+        const res = await fetch(`/api/map/addresses/predict?applId=${encodeURIComponent(applId)}&addressId=${encodeURIComponent(addressId)}`);
+        return res.json();
+    }
 }

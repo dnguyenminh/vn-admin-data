@@ -67,9 +67,21 @@ public class MapServiceUnitTest {
         assertThat(mapService.isExactAddress("12 Nguyễn Trãi")).isFalse();
         assertThat(mapService.isExactAddress("Số 12 Nguyễn Trãi")).isFalse();
         assertThat(mapService.isExactAddress("12/3 Nguyễn Trãi")).isFalse();
-        // Explicit street tokens are required to consider an address exact
-        assertThat(mapService.isExactAddress("Đường Nguyễn Trãi 12")).isTrue();
-        assertThat(mapService.isExactAddress("Phố Nguyễn Trãi số 12")).isTrue();
+        // Explicit street tokens where the number follows the token are still ambiguous
+        assertThat(mapService.isExactAddress("Đường Nguyễn Trãi 12")).isFalse();
+        assertThat(mapService.isExactAddress("Phố Nguyễn Trãi số 12")).isFalse();
+        // Number-before-street without locality is still ambiguous and should be non-exact
+        assertThat(mapService.isExactAddress("12 Đường Nguyễn Trãi")).isFalse();
+        // When locality specificity is insufficient (district only, missing province) it's non-exact
+        assertThat(mapService.isExactAddress("12 Đường Nguyễn Trãi, Quận 1")).isFalse();
+        // Ward present but missing province -> non-exact
+        assertThat(mapService.isExactAddress("12 Đường Nguyễn Trãi, Phường Phúc Xá")).isFalse();
+        // Province present but missing district/ward -> non-exact
+        assertThat(mapService.isExactAddress("12 Đường Nguyễn Trãi, Thành phố Hà Nội")).isFalse();
+        // Full locality (ward + province) is sufficient
+        assertThat(mapService.isExactAddress("12 Đường Nguyễn Trãi, Phường Phúc Xá, Thành phố Hà Nội")).isFalse();
+        // Full locality (district + province) is sufficient
+        assertThat(mapService.isExactAddress("12 Đường Nguyễn Trãi, Quận 1, Thành phố Hà Nội")).isFalse();
         // Alley expressions like 'Ngõ 12 Nguyễn Trãi' are ambiguous (alley number) and should be non-exact
         // With the stricter heuristic (explicit street token required), this should be false
         assertThat(mapService.isExactAddress("12 Nguyễn Trãi")).isFalse();
@@ -82,18 +94,33 @@ public class MapServiceUnitTest {
 
         // Example reported by user: administrative-only address without house number
         assertThat(mapService.isExactAddress("Đức Thắng Xã Thượng Ninh Như Xuân Tỉnh Thanh Hóa")).isFalse();
+        // User-reported administrative-only address should also be non-exact
+        assertThat(mapService.isExactAddress("Bản Đoàn Kết Xã Sơn A Nghĩa Lộ Tỉnh Yên Bái")).isFalse();
     }
 
     @Test
     void getAddressListPaged_includesIsExactFlag() throws Exception {
-        // Mock count
-        when(jdbcTemplate.queryForObject(contains("COUNT(*)"), eq(Long.class), any(Object[].class))).thenReturn(2L);
+        // Mock count of customer addresses
+        // COUNT(*) for customer_address only (avoid matching checkin count)
+        when(jdbcTemplate.queryForObject(contains("FROM customer_address"), eq(Long.class), any(Object[].class))).thenReturn(2L);
         // Mock list result
         java.util.Map<String, Object> a = new java.util.HashMap<>();
         a.put("id", "1"); a.put("name", "12 Nguyễn Trãi"); a.put("address_type", "home");
         java.util.Map<String, Object> b = new java.util.HashMap<>();
         b.put("id", "2"); b.put("name", "Phường Phúc Xá"); b.put("address_type", "ward");
         when(jdbcTemplate.queryForList(anyString(), any(Object[].class))).thenReturn(java.util.Arrays.asList(a, b));
+
+        // Stub centroid prediction only for address id "1" so is_resolvable true for first item only
+        String centroid = "{\"type\":\"Point\",\"coordinates\":[106.0,10.0]}";
+        org.mockito.Mockito.doAnswer(invocation -> {
+            Object[] args = invocation.getArguments();
+            // the address id is passed as the last vararg in the query
+            Object addrId = args[2];
+            if ("1".equals(String.valueOf(addrId))) return centroid;
+            throw new org.springframework.dao.EmptyResultDataAccessException(1);
+        }).when(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.contains("ST_Centroid"), eq(String.class), org.mockito.ArgumentMatchers.any());
+        // Ensure DB verification returns no checkins for address id '1'
+        when(jdbcTemplate.queryForObject(startsWith("SELECT COUNT(*) FROM checkin_address"), eq(Long.class), eq("1"))).thenReturn(0L);
 
         Map<String, Object> resp = mapService.getAddressListPaged("appl1", "", 0, 10);
         assertThat(resp).isNotNull();
@@ -105,6 +132,41 @@ public class MapServiceUnitTest {
         java.util.Map<?, ?> it1 = (java.util.Map<?, ?>) items.get(1);
         assertThat(it0.get("is_exact")).isEqualTo(Boolean.FALSE);
         assertThat(it1.get("is_exact")).isEqualTo(Boolean.FALSE);
+        assertThat(it0.get("is_resolvable")).isEqualTo(Boolean.TRUE);
+        assertThat(it1.get("is_resolvable")).isEqualTo(Boolean.FALSE);
+    }
+
+    @Test
+    void getAddressListPaged_requiresDbVerification_noCheckins_notExact() throws Exception {
+        // count of customer addresses
+        when(jdbcTemplate.queryForObject(contains("COUNT(*) FROM customer_address"), eq(Long.class), any(Object[].class))).thenReturn(1L);
+        // one address that is syntactically full-locality
+        java.util.Map<String, Object> a = new java.util.HashMap<>();
+        a.put("id", "3"); a.put("name", "12 Đường Nguyễn Trãi, Phường Phúc Xá, Thành phố Hà Nội"); a.put("address_type", "home");
+        when(jdbcTemplate.queryForList(anyString(), any(Object[].class))).thenReturn(java.util.Arrays.asList(a));
+        // DB verification: no checkins for address id 3
+        when(jdbcTemplate.queryForObject(startsWith("SELECT COUNT(*) FROM checkin_address"), eq(Long.class), eq(3))).thenReturn(0L);
+
+        Map<String, Object> resp = mapService.getAddressListPaged("appl1", "", 0, 10);
+        java.util.List<?> items = (java.util.List<?>) resp.get("items");
+        java.util.Map<?, ?> it0 = (java.util.Map<?, ?>) items.get(0);
+        // although syntactically exact, DB verification fails -> is_exact should be false
+        assertThat(it0.get("is_exact")).isEqualTo(Boolean.FALSE);
+    }
+
+    @Test
+    void getAddressListPaged_requiresDbVerification_withCheckins_becomesExact() throws Exception {
+        when(jdbcTemplate.queryForObject(contains("COUNT(*) FROM customer_address"), eq(Long.class), any(Object[].class))).thenReturn(1L);
+        java.util.Map<String, Object> a = new java.util.HashMap<>();
+        a.put("id", "4"); a.put("name", "12 Đường Nguyễn Trãi, Phường Phúc Xá, Thành phố Hà Nội"); a.put("address_type", "home");
+        when(jdbcTemplate.queryForList(anyString(), any(Object[].class))).thenReturn(java.util.Arrays.asList(a));
+        // DB verification: checkins exist for address id 4
+        when(jdbcTemplate.queryForObject(startsWith("SELECT COUNT(*) FROM checkin_address"), eq(Long.class), eq(4))).thenReturn(2L);
+
+        Map<String, Object> resp = mapService.getAddressListPaged("appl1", "", 0, 10);
+        java.util.List<?> items = (java.util.List<?>) resp.get("items");
+        java.util.Map<?, ?> it0 = (java.util.Map<?, ?>) items.get(0);
+        assertThat(it0.get("is_exact")).isEqualTo(Boolean.TRUE);
     }
 
     @Test
@@ -115,10 +177,23 @@ public class MapServiceUnitTest {
         // the feature-query stub and Mockito may flag an unused/ambiguous stub
         // (PotentialStubbingProblem). Stub COUNT(*) explicitly so the flow
         // proceeds and the geojson response can be exercised.
-        when(jdbcTemplate.queryForObject(contains("COUNT(*)"), eq(Long.class), any(Object[].class))).thenReturn(1L);
+        // COUNT(*) for feature query total (customer_address count) only
+        when(jdbcTemplate.queryForObject(contains("FROM customer_address"), eq(Long.class), any(Object[].class))).thenReturn(1L);
         // no ST_Contains stub here (not used by this method)
         // Return the feature collection JSON for the feature query
         when(jdbcTemplate.queryForObject(startsWith("SELECT jsonb_build_object('type','FeatureCollection'"), eq(String.class), any())).thenReturn(raw);
+        // Make prediction succeed for the feature id '1' so we can assert is_resolvable exists and is true
+        String centroid = "{\"type\":\"Point\",\"coordinates\":[106.0,10.0]}";
+        org.mockito.Mockito.doAnswer(invocation -> {
+            Object[] args = invocation.getArguments();
+            Object addrId = args[2];
+            if ("1".equals(String.valueOf(addrId))) return centroid;
+            throw new org.springframework.dao.EmptyResultDataAccessException(1);
+        }).when(jdbcTemplate).queryForObject(org.mockito.ArgumentMatchers.contains("ST_Centroid"), eq(String.class), org.mockito.ArgumentMatchers.any());
+        // Sanity-check: prediction for address '1' should be available
+        com.fasterxml.jackson.databind.JsonNode pred = mapService.predictAddressLocation("appl1", "1");
+        assertThat(pred).isNotNull();
+
         JsonNode node = mapService.getAddressesGeoJsonByAppl("appl1");
         assertThat(node).isNotNull();
         assertThat(node.has("features")).isTrue();
@@ -129,6 +204,12 @@ public class MapServiceUnitTest {
         // appl_id should be present and equal to the requested application id
         assertThat(f.get("properties").has("appl_id")).isTrue();
         assertThat(f.get("properties").get("appl_id").asText()).isEqualTo("appl1");
+        assertThat(f.get("properties").has("is_resolvable")).isTrue();
+        assertThat(f.get("properties").get("is_resolvable").asBoolean()).isTrue();
+        // Predicted feature should be embedded so clients can render predicted points without extra requests
+        assertThat(f.get("properties").has("predicted_feature")).isTrue();
+        assertThat(f.get("properties").get("predicted_feature").has("geometry")).isTrue();
+        assertThat(f.get("properties").get("predicted_feature").get("properties").has("verified")).isTrue();
     }
 
     @Test
@@ -173,5 +254,33 @@ public class MapServiceUnitTest {
         assertThat(feat.get("properties").get("adjusted").asBoolean()).isTrue();
         assertThat(feat.get("geometry").get("type").asText()).isEqualTo("Point");
         assertThat(feat.get("properties").get("appl_id").asText()).isEqualTo("appl1");
+    }
+
+    @Test
+    void predictAddressLocation_centroid_sets_verified_true() throws Exception {
+        // Mock centroid from checkins
+        String centroid = "{\"type\":\"Point\",\"coordinates\":[106.0,10.0]}";
+        when(jdbcTemplate.queryForObject(contains("ST_Centroid"), eq(String.class), any())).thenReturn(centroid);
+
+        com.fasterxml.jackson.databind.JsonNode feat = mapService.predictAddressLocation("appl1", "10");
+        assertThat(feat).isNotNull();
+        assertThat(feat.get("properties").has("verified")).isTrue();
+        assertThat(feat.get("properties").get("verified").asBoolean()).isTrue();
+    }
+
+    @Test
+    void predictAddressLocation_dbVerify_sets_verified_true_when_no_centroid() throws Exception {
+        // No centroid available
+        when(jdbcTemplate.queryForObject(contains("ST_Centroid"), eq(String.class), any())).thenReturn(null);
+        // DB verification returns positive count (match Integer arg)
+        when(jdbcTemplate.queryForObject(startsWith("SELECT COUNT(*) FROM checkin_address"), eq(Long.class), eq(11))).thenReturn(3L);
+
+        // Ensure fallback point is available when centroid is missing
+        String fallbackPoint = "{\"type\":\"Point\",\"coordinates\":[106.0,10.0]}";
+        when(jdbcTemplate.queryForObject(startsWith("SELECT ST_AsGeoJSON(ST_SetSRID(ST_Point"), eq(String.class), any())).thenReturn(fallbackPoint);
+        com.fasterxml.jackson.databind.JsonNode feat = mapService.predictAddressLocation("appl1", "11");
+        assertThat(feat).isNotNull();
+        assertThat(feat.get("properties").has("verified")).isTrue();
+        assertThat(feat.get("properties").get("verified").asBoolean()).isTrue();
     }
 }

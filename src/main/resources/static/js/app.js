@@ -133,6 +133,25 @@ export default class App {
                     this.map.focusToLatLng(Number(item.address_lat), Number(item.address_long), 16);
                 }
             }
+            // show prediction for this address when focusing it
+            try {
+                // Prefer embedded prediction on the currently-loaded address layer to avoid an extra request
+                let embeddedPred = null;
+                this.map.addressLayer.eachLayer(al => {
+                    try {
+                        const id = al.feature && al.feature.properties && al.feature.properties.id;
+                        if (String(id) === String(addrId) && al.feature.properties && al.feature.properties.predicted_feature) {
+                            embeddedPred = al.feature.properties.predicted_feature;
+                        }
+                    } catch (e) { /* ignore */ }
+                });
+                if (embeddedPred) {
+                    this.map.showPredictedAddress(embeddedPred);
+                } else {
+                    const pred = await this.api.getPredictedAddress(applId, addrId);
+                    if (pred && pred.geometry) this.map.showPredictedAddress(pred);
+                }
+            } catch (e) { /* ignore prediction errors */ }
         });
 
         this.ui.bindFocusFc(async () => {
@@ -232,6 +251,7 @@ export default class App {
             this.ui.populateFcIds([]);
             this.map.addressLayer.clearLayers();
             this.map.clearCheckins();
+            this.map.clearPredicted();
             return;
         }
         // load first page of addresses and checkins for this customer
@@ -293,6 +313,26 @@ export default class App {
         } catch (e) {
             console.warn('Reverse lookup failed for address', addrId, e);
         }
+
+        // Fetch and show predicted marker for this address so user sees the predicted location
+        try {
+            // prefer embedded prediction if present on the currently-loaded address layer
+            let embeddedPred = null;
+            this.map.addressLayer.eachLayer(al => {
+                try {
+                    const id = al.feature && al.feature.properties && al.feature.properties.id;
+                    if (String(id) === String(addrId) && al.feature.properties && al.feature.properties.predicted_feature) {
+                        embeddedPred = al.feature.properties.predicted_feature;
+                    }
+                } catch (e) { /* ignore */ }
+            });
+            if (embeddedPred) {
+                this.map.showPredictedAddress(embeddedPred);
+            } else {
+                const pred = await this.api.getPredictedAddress(this.selectedCustomerId || this.ui.getSelectedCustomerId(), addrId);
+                if (pred && pred.geometry) this.map.showPredictedAddress(pred);
+            }
+        } catch (e) { /* ignore */ }
     }
 
     async handleFcChange(fcId) {

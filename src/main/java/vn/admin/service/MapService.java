@@ -439,7 +439,43 @@ public class MapService {
         for (Map<String, Object> r : rows) {
             Object addrObj = r.get("name");
             String addr = addrObj != null ? String.valueOf(addrObj) : null;
-            r.put("is_exact", isExactAddress(addr));
+            boolean exact = isExactAddress(addr);
+            // Final 'is_exact' requires DB-backed verification (checkins exist)
+            Object idObj = r.get("id");
+            String addrId = idObj == null ? null : String.valueOf(idObj);
+            // Final is_exact requires DB-backed verification. We mark an address
+            // as exact when there is authoritative evidence (e.g., checkins)
+            // associated with that address id regardless of the syntactic
+            // heuristic, per the DB-backed verification policy (Option 3).
+            boolean verifiedExact = dbVerifyAddressById(addrId);
+            r.put("is_exact", verifiedExact);
+            // is_resolvable: true if syntactically exact OR if we can predict a location from checkins
+            boolean resolvable = exact;
+            com.fasterxml.jackson.databind.JsonNode pred = null;
+            if (!resolvable) {
+                try {
+                    pred = predictAddressLocation(applId, addrId);
+                    resolvable = pred != null && !pred.isNull();
+                } catch (Exception e) {
+                    // ignore prediction errors and leave resolvable as-is
+                }
+            }
+            // copy prediction metadata when present
+            if (pred != null && !pred.isNull() && pred.has("properties")) {
+                try {
+                    com.fasterxml.jackson.databind.JsonNode pp = pred.get("properties");
+                    if (pp.has("confidence")) r.put("confidence", pp.get("confidence").asDouble(0.0));
+                    if (pp.has("resolvability_reason")) r.put("resolvability_reason", pp.get("resolvability_reason").asText(""));
+                    if (pp.has("inferred_province_id")) r.put("inferred_province_id", pp.get("inferred_province_id").asText(""));
+                    if (pp.has("inferred_province_name")) r.put("inferred_province_name", pp.get("inferred_province_name").asText(""));
+                    if (pp.has("inferred_district_id")) r.put("inferred_district_id", pp.get("inferred_district_id").asText(""));
+                    if (pp.has("inferred_district_name")) r.put("inferred_district_name", pp.get("inferred_district_name").asText(""));
+                    if (pp.has("inferred_ward_id")) r.put("inferred_ward_id", pp.get("inferred_ward_id").asText(""));
+                    if (pp.has("inferred_ward_name")) r.put("inferred_ward_name", pp.get("inferred_ward_name").asText(""));
+                    if (pp.has("verified")) r.put("verified", pp.get("verified").asBoolean(false));
+                } catch (Exception e) { /* ignore metadata extraction */ }
+            }
+            r.put("is_resolvable", resolvable);
         }
         return rows;
     }
@@ -465,7 +501,37 @@ public class MapService {
         for (Map<String, Object> item : items) {
             Object addrObj = item.get("name");
             String addr = addrObj != null ? String.valueOf(addrObj) : null;
-            item.put("is_exact", isExactAddress(addr));
+            boolean exact = isExactAddress(addr);
+            Object idObj = item.get("id");
+            String addrId = idObj == null ? null : String.valueOf(idObj);
+            // DB verification determines final exactness
+            boolean verifiedExact = dbVerifyAddressById(addrId);
+            item.put("is_exact", verifiedExact);
+            // is_resolvable: true if syntactically exact or prediction from checkins exists
+            boolean resolvable = exact;
+            com.fasterxml.jackson.databind.JsonNode pred = null;
+            if (!resolvable) {
+                try {
+                    pred = predictAddressLocation(applId, addrId);
+                    resolvable = pred != null && !pred.isNull();
+                } catch (Exception e) { /* ignore */ }
+            }
+            item.put("is_resolvable", resolvable);
+            // copy prediction metadata into item when present
+            if (pred != null && !pred.isNull() && pred.has("properties")) {
+                try {
+                    com.fasterxml.jackson.databind.JsonNode pp = pred.get("properties");
+                    if (pp.has("confidence")) item.put("confidence", pp.get("confidence").asDouble(0.0));
+                    if (pp.has("resolvability_reason")) item.put("resolvability_reason", pp.get("resolvability_reason").asText(""));
+                    if (pp.has("inferred_province_id")) item.put("inferred_province_id", pp.get("inferred_province_id").asText(""));
+                    if (pp.has("inferred_province_name")) item.put("inferred_province_name", pp.get("inferred_province_name").asText(""));
+                    if (pp.has("inferred_district_id")) item.put("inferred_district_id", pp.get("inferred_district_id").asText(""));
+                    if (pp.has("inferred_district_name")) item.put("inferred_district_name", pp.get("inferred_district_name").asText(""));
+                    if (pp.has("inferred_ward_id")) item.put("inferred_ward_id", pp.get("inferred_ward_id").asText(""));
+                    if (pp.has("inferred_ward_name")) item.put("inferred_ward_name", pp.get("inferred_ward_name").asText(""));
+                    if (pp.has("verified")) item.put("verified", pp.get("verified").asBoolean(false));
+                } catch (Exception e) { /* ignore */ }
+            }
         }
 
         Map<String, Object> resp = new java.util.HashMap<>();
@@ -509,9 +575,49 @@ public class MapService {
                             JsonNode props = f.get("properties");
                                 if (props != null && props.has("address")) {
                                 String a = props.get("address").asText(null);
-                                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("is_exact", isExactAddress(a));
+                                boolean syntacticExact = isExactAddress(a);
+                                String aid = props.has("id") ? props.get("id").asText(null) : null;
+                                // Final is_exact determined by DB-backed verification only (Option 3)
+                                boolean verifiedExact = dbVerifyAddressById(aid);
+                                try {
+                                    log.info("getAddressesGeoJsonByAppl: applId={}, aid={}, verifiedExact={}", applId, aid, verifiedExact);
+                                } catch (Exception ignore) { }
+                                // Extra stdout for integration test visibility
+                                try { System.out.println("DIAG_GEOJSON_VERIFY: applId=" + applId + " aid=" + aid + " verifiedExact=" + verifiedExact); } catch (Exception ignore) { }
+                                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("is_exact", verifiedExact);
                                 // ensure appl_id is present on each feature so UI tooltips show the application id
                                 ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("appl_id", applId);
+                                // is_resolvable: if syntactically exact OR prediction exists via checkins
+                                boolean exact = isExactAddress(a);
+                                boolean resolvable = exact;
+                                double confidence = 0.0;
+                                String reason = "insufficient_locality";
+                                if (!resolvable) {
+                                    try {
+                                        com.fasterxml.jackson.databind.JsonNode pred = predictAddressLocation(applId, aid);
+                                        resolvable = pred != null && !pred.isNull();
+                                        if (pred != null && !pred.isNull() && pred.has("properties")) {
+                                            com.fasterxml.jackson.databind.JsonNode pp = pred.get("properties");
+                                            if (pp.has("confidence")) confidence = pp.get("confidence").asDouble(0.0);
+                                            if (pp.has("resolvability_reason")) reason = pp.get("resolvability_reason").asText("insufficient_locality");
+                                            if (pp.has("inferred_province_id")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_province_id", pp.get("inferred_province_id").asText(""));
+                                            if (pp.has("inferred_province_name")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_province_name", pp.get("inferred_province_name").asText(""));
+                                            if (pp.has("inferred_district_id")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_district_id", pp.get("inferred_district_id").asText(""));
+                                            if (pp.has("inferred_district_name")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_district_name", pp.get("inferred_district_name").asText(""));
+                                            if (pp.has("inferred_ward_id")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_ward_id", pp.get("inferred_ward_id").asText(""));
+                                            if (pp.has("inferred_ward_name")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_ward_name", pp.get("inferred_ward_name").asText(""));
+                                            if (pp.has("verified")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("verified", pp.get("verified").asBoolean(false));
+                                            // Also embed the predicted feature and geometry so clients can render predicted points without an extra request
+                                            try {
+                                                ((com.fasterxml.jackson.databind.node.ObjectNode) props).set("predicted_feature", pred);
+                                                if (pred.has("geometry")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).set("predicted_geometry", pred.get("geometry"));
+                                            } catch (Exception e) { /* ignore embedding issues */ }
+                                        }
+                                    } catch (Exception e) { /* ignore */ }
+                                }
+                                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("is_resolvable", resolvable);
+                                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("confidence", confidence);
+                                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("resolvability_reason", reason);
                                 }
                         } catch (Exception e) { /* ignore per-feature */ }
                     }
@@ -533,9 +639,46 @@ public class MapService {
                                 JsonNode props = f.get("properties");
                                 if (props != null && props.has("address")) {
                                     String a = props.get("address").asText(null);
-                                    ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("is_exact", isExactAddress(a));
-                                    // ensure appl_id is present on each feature so UI tooltips show the application id
-                                    ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("appl_id", applId);
+                                            boolean syntacticExact = isExactAddress(a);
+                                            String aid = props.has("id") ? props.get("id").asText(null) : null;
+                                            // Final is_exact determined by DB-backed verification only (Option 3)
+                                            boolean verifiedExact = dbVerifyAddressById(aid);
+                                            try {
+                                                log.info("getAddressesGeoJsonByAppl: applId={}, aid={}, verifiedExact={}", applId, aid, verifiedExact);
+                                            } catch (Exception ignore) { }
+                                            try { System.out.println("DIAG_GEOJSON_VERIFY: applId=" + applId + " aid=" + aid + " verifiedExact=" + verifiedExact); } catch (Exception ignore) { }
+                                            ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("is_exact", verifiedExact);
+                                        // ensure appl_id is present on each feature so UI tooltips show the application id
+                                        ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("appl_id", applId);
+                                            boolean resolvable = syntacticExact;
+                                        double confidence = 0.0;
+                                        String reason = "insufficient_locality";
+                                        if (!resolvable) {
+                                            try {
+                                                    com.fasterxml.jackson.databind.JsonNode pred = predictAddressLocation(applId, aid);
+                                                    resolvable = pred != null && !pred.isNull();
+                                                    if (pred != null && !pred.isNull() && pred.has("properties")) {
+                                                        com.fasterxml.jackson.databind.JsonNode pp = pred.get("properties");
+                                                    if (pp.has("confidence")) confidence = pp.get("confidence").asDouble(0.0);
+                                                    if (pp.has("resolvability_reason")) reason = pp.get("resolvability_reason").asText("insufficient_locality");
+                                                    if (pp.has("inferred_province_id")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_province_id", pp.get("inferred_province_id").asText(""));
+                                                    if (pp.has("inferred_province_name")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_province_name", pp.get("inferred_province_name").asText(""));
+                                                    if (pp.has("inferred_district_id")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_district_id", pp.get("inferred_district_id").asText(""));
+                                                    if (pp.has("inferred_district_name")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_district_name", pp.get("inferred_district_name").asText(""));
+                                                    if (pp.has("inferred_ward_id")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_ward_id", pp.get("inferred_ward_id").asText(""));
+                                                    if (pp.has("inferred_ward_name")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_ward_name", pp.get("inferred_ward_name").asText(""));
+                                                    if (pp.has("verified")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("verified", pp.get("verified").asBoolean(false));
+                                                        // also embed predicted feature and geometry to the properties
+                                                        try {
+                                                            ((com.fasterxml.jackson.databind.node.ObjectNode) props).set("predicted_feature", pred);
+                                                            if (pred.has("geometry")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).set("predicted_geometry", pred.get("geometry"));
+                                                        } catch (Exception e) { /* ignore */ }
+                                                }
+                                            } catch (Exception e) { /* ignore per-feature */ }
+                                        }
+                                        ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("is_resolvable", resolvable);
+                                        ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("confidence", confidence);
+                                        ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("resolvability_reason", reason);
                                 }
                             } catch (Exception e) { /* ignore per-feature */ }
                         }
@@ -556,11 +699,8 @@ public class MapService {
             if (address == null) return false;
             String s = address.trim().toLowerCase();
             if (s.isEmpty()) return false;
-            // Administrative keywords indicate non-exact addresses when present
-            if (s.matches(".*\\b(huyện|quận|phường|xã|tỉnh|thành phố|thị xã)\\b.*")) {
-                // If it's like 'Quận 1' (admin + number) treat as non-exact
-                return false;
-            }
+            // Administrative keywords are important to detect pure-admin strings
+            boolean adminTokenPresent = s.matches(".*\\b(huyện|quận|phường|xã|tỉnh|thành phố|thị xã)\\b.*");
             // Normalize and detect numeric/structural cues
             boolean hasNumber = s.matches(".*\\d.*");
             boolean hasHousePrefix = s.matches(".*\\b(số|so)\\s*\\d+.*");
@@ -572,12 +712,53 @@ public class MapService {
             boolean hasAlleyNumber = s.matches(".*\\b(ngõ|ngo|hẻm|hem|ngách|ngach)\\s*\\d+.*");
 
             // Only treat an address as syntactically 'exact' when it contains a numeric house
-            // AND an explicit street token (e.g., 'đường', 'phố'). This is intentionally strict
-            // because a bare number followed by a locality name ("12 Nguyễn Trãi") may be
-            // ambiguous without admin context and should not be considered resolvable.
+            // that appears *before* an explicit street token (e.g., '12 Đường Nguyễn Trãi')
+            // AND additionally contains an administrative locality token (ward/district/province)
+            // because a plain house+street without a locality is often ambiguous in the dataset.
+            // Alley numbers (ngõ/hẻm/ngách) remain non-exact.
             if (hasAlleyNumber) return false;
-            if (hasNumber && hasStreetKeyword) return true;
+            boolean numberBeforeStreet = s.matches(".*\\b\\d+(?:\\s*\\/\\s*\\d+)?\\b\\s+(đường|duong|phố|pho|khu phố|khu pho|đ|d)\\b.*");
+            // Determine if admin token is sufficiently specific.
+            // - Ward-level tokens (phường/xã) are specific enough.
+            // - Province-level tokens (tỉnh/thành phố/thị xã) are specific enough.
+            // - District tokens (quận/huyện) are NOT sufficient on their own because
+            //   they are ambiguous without a province (e.g., 'Quận 1' appears in multiple cities).
+            boolean hasWard = s.matches(".*\\b(phường|xã)\\b.*");
+            boolean hasProvince = s.matches(".*\\b(tỉnh|thành phố|thị xã|tp|tp\\.|tp)\\b.*");
+            boolean hasDistrict = s.matches(".*\\b(quận|huyện)\\b.*");
+
+            // Exact only when number-before-street AND province is present AND
+            // ward is present AND an explicit house prefix ('số') is used.
+            // This is deliberately strict: syntactic exactness alone is a weak
+            // signal and we prefer to require a clear explicit form before
+            // considering the address syntactically exact. A DB-backed
+            // verification step is still required for the final `is_exact` flag.
+            if (numberBeforeStreet && hasProvince && hasWard && hasHousePrefix) return true;
+            // If it's purely administrative (admin token present but no number-before-street)
+            // keep it non-exact.
+            if (adminTokenPresent && !numberBeforeStreet) return false;
             return false;
+        }
+
+        /**
+         * DB-backed verification: check whether this address id has any checkins
+         * associated with it. This is a conservative proxy for 'this address is
+         * known in the database / seen in the wild'. The query accepts addressId
+         * as text to avoid integer conversion problems in tests/requests.
+         */
+        private boolean dbVerifyAddressById(String addressId) {
+            if (addressId == null) return false;
+            try {
+                // Parse the id into an integer to avoid driver-specific issues with casting
+                int aid = Integer.parseInt(addressId);
+                Long cnt = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM checkin_address WHERE customer_address_id = ?", Long.class, aid);
+                return cnt != null && cnt > 0;
+            } catch (NumberFormatException nfe) {
+                return false;
+            } catch (Exception e) {
+                // Any DB error -> conservative false
+                return false;
+            }
         }
 
     private JsonNode emptyFeatureCollection() {
@@ -593,21 +774,37 @@ public class MapService {
     }
 
     public JsonNode getCheckinsGeoJsonByAppl(String applId, String fcId, Integer page, Integer size) {
-        String where = " WHERE appl_id = ? AND field_lat IS NOT NULL AND field_long IS NOT NULL";
+        // Use an aliased WHERE for feature SQL (needs 'c.' prefixes) and a plain WHERE for the count query
+        String where = " WHERE c.appl_id = ? AND c.field_lat IS NOT NULL AND c.field_long IS NOT NULL";
+        String whereCount = " WHERE appl_id = ? AND field_lat IS NOT NULL AND field_long IS NOT NULL";
         java.util.ArrayList<Object> countArgs = new java.util.ArrayList<>();
         countArgs.add(applId);
         if (fcId != null && !fcId.isEmpty()) {
             where += " AND fc_id = ?";
+            whereCount += " AND fc_id = ?";
             countArgs.add(fcId);
         }
-        String countSql = "SELECT COUNT(*) FROM checkin_address" + where;
+        String countSql = "SELECT COUNT(*) FROM checkin_address" + whereCount;
         long total = jdbcTemplate.queryForObject(countSql, Long.class, countArgs.toArray());
 
+        // Enrich checkin features with stored/normalized distance and administrative info
+        // The SQL builds GeoJSON Features and left-joins admin tables based on point containment.
         String featuresSql = "SELECT jsonb_build_object('type','FeatureCollection','features', jsonb_agg(features.feature)" +
-                (page != null && size != null ? ", 'meta', jsonb_build_object('total', ?, 'page', ?, 'size', ?)" : "") +
-                ") FROM (" +
-                " SELECT jsonb_build_object('type','Feature', 'geometry', ST_AsGeoJSON(ST_SetSRID(ST_Point(field_long::double precision, field_lat::double precision),4326))::jsonb, 'properties', jsonb_build_object('id', id, 'appl_id', appl_id, 'fc_id', fc_id, 'customer_address_id', customer_address_id, 'checkin_date', checkin_date)) AS feature FROM checkin_address" +
-                where;
+            (page != null && size != null ? ", 'meta', jsonb_build_object('total', ?, 'page', ?, 'size', ?)" : "") +
+            ") FROM (" +
+            " SELECT jsonb_build_object('type','Feature', " +
+            " 'geometry', ST_AsGeoJSON(ST_SetSRID(ST_Point(c.field_long::double precision, c.field_lat::double precision),4326))::jsonb, " +
+            " 'properties', jsonb_build_object(" +
+            "    'id', c.id, 'appl_id', c.appl_id, 'fc_id', c.fc_id, 'customer_address_id', c.customer_address_id, 'checkin_date', c.checkin_date, " +
+            // distance: prefer persisted value, otherwise compute from linked customer address when available
+            "    'distance', COALESCE(c.distance, ROUND(ST_Distance(ST_SetSRID(ST_Point(c.field_long::double precision, c.field_lat::double precision),4326)::geography, ST_SetSRID(ST_Point(a.address_long::double precision, a.address_lat::double precision),4326)::geography)::numeric,0)::double precision), " +
+            "    'provinceId', p.province_id, 'provinceName', p.name_vn, 'districtId', d.district_id, 'districtName', d.name_vn, 'wardId', w.ward_id, 'wardName', w.name_vn " +
+            " ) ) AS feature FROM checkin_address c " +
+            " LEFT JOIN customer_address a ON c.customer_address_id = a.id " +
+            " LEFT JOIN vn_wards w ON ST_Contains(w.geom_boundary, ST_SetSRID(ST_Point(c.field_long::double precision, c.field_lat::double precision),4326)) " +
+            " LEFT JOIN vn_districts d ON (w.district_id = d.district_id) " +
+            " LEFT JOIN vn_provinces p ON (d.province_id = p.province_id)" +
+            where;
 
         if (page != null && size != null) {
             featuresSql += " ORDER BY id LIMIT ? OFFSET ?";
@@ -709,8 +906,13 @@ public class MapService {
             // Accept addressId passed as text by casting to integer so controller request params (strings)
             // work without causing "integer = character varying" errors in some Postgres setups.
             String csql = "SELECT ST_AsGeoJSON(ST_Centroid(ST_Collect(ST_SetSRID(ST_Point(field_long::double precision, field_lat::double precision),4326)))) FROM checkin_address WHERE customer_address_id = ?::int";
-            String centroidRaw = jdbcTemplate.queryForObject(csql, String.class, addressId);
-            if (centroidRaw == null) return NullNode.instance;
+            String centroidRaw = null;
+            try {
+                centroidRaw = jdbcTemplate.queryForObject(csql, String.class, addressId);
+            } catch (Exception e) {
+                // keep centroidRaw as null and continue to allow DB-backed verification fallback
+                centroidRaw = null;
+            }
 
             // Attempt to infer administrative area from the address text (ward -> district -> province)
             String addrSql = "SELECT address FROM customer_address WHERE id::text = ? LIMIT 1";
@@ -743,6 +945,20 @@ public class MapService {
 
             String predictedGeoJson = centroidRaw;
             boolean adjusted = false;
+            // If no centroid was computed, try a DB-backed fallback: if checkins exist, pick any checkin point
+            if (predictedGeoJson == null) {
+                try {
+                    boolean dbvFallback = dbVerifyAddressById(addressId);
+                    if (dbvFallback) {
+                        String firstPointSql = "SELECT ST_AsGeoJSON(ST_SetSRID(ST_Point(field_long::double precision, field_lat::double precision),4326)) FROM checkin_address WHERE customer_address_id = ?::int LIMIT 1";
+                        String firstPoint = jdbcTemplate.queryForObject(firstPointSql, String.class, addressId);
+                        if (firstPoint != null) {
+                            predictedGeoJson = firstPoint;
+                            adjusted = false;
+                        }
+                    }
+                } catch (Exception e) { /* ignore fallback failures */ }
+            }
             if (areaGeoJson != null) {
                 // First check whether the centroid is already inside the inferred administrative area
                 Boolean contains = jdbcTemplate.queryForObject("SELECT ST_Contains(ST_SetSRID(ST_GeomFromGeoJSON(?),4326), ST_SetSRID(ST_GeomFromGeoJSON(?),4326))", Boolean.class, areaGeoJson, centroidRaw);
@@ -769,10 +985,101 @@ public class MapService {
             props.put("addressId", addressId);
             props.put("adjusted", adjusted);
             props.put("areaLevel", areaLevel == null ? "" : areaLevel);
+
+            // Inferred administrative units based on predicted point
+            try {
+                com.fasterxml.jackson.databind.JsonNode inferred = reverseLookupByPointAsJson(predictedGeoJson);
+                if (inferred != null && !inferred.isEmpty(null) && !inferred.isNull()) {
+                    if (inferred.has("provinceId")) props.put("inferred_province_id", inferred.get("provinceId").asText(""));
+                    if (inferred.has("provinceName")) props.put("inferred_province_name", inferred.get("provinceName").asText(""));
+                    if (inferred.has("districtId")) props.put("inferred_district_id", inferred.get("districtId").asText(""));
+                    if (inferred.has("districtName")) props.put("inferred_district_name", inferred.get("districtName").asText(""));
+                    if (inferred.has("wardId")) props.put("inferred_ward_id", inferred.get("wardId").asText(""));
+                    if (inferred.has("wardName")) props.put("inferred_ward_name", inferred.get("wardName").asText(""));
+                }
+            } catch (Exception e) { /* ignore inference issues */ }
+
+                // Debug logging to help trace verification issues in integration tests
+                try {
+                    log.info("predictAddressLocation debug: applId={}, addressId={}, centroidPresent={}, dbVerify={}", applId, addressId, centroidRaw != null, dbVerifyAddressById(addressId));
+                } catch (Exception ignore) { }
+                // Additional diagnostics printed to stdout to ensure visibility in test runs
+                try {
+                    System.out.println("DIAG_SERVICE: applId=" + applId + " addressId=" + addressId + " centroidRaw=" + centroidRaw + " areaGeoJson=" + areaGeoJson + "");
+                    boolean dbv = dbVerifyAddressById(addressId);
+                    System.out.println("DIAG_SERVICE_DBVERIFY: " + dbv);
+                } catch (Exception ignore) { }
+
+            // Compute a lightweight confidence score and reason
+            double confidence = 0.0;
+            String reason = "insufficient_locality";
+            boolean syntacticExact = isExactAddress(addrText);
+            if (syntacticExact) {
+                confidence += 0.6;
+                reason = "syntactic_exact";
+            }
+            if (centroidRaw != null) {
+                confidence += 0.3;
+                if (!"syntactic_exact".equals(reason)) reason = "predicted_from_checkins";
+            }
+            if (areaGeoJson != null) {
+                try {
+                    Boolean containsCentroid = jdbcTemplate.queryForObject("SELECT ST_Contains(ST_SetSRID(ST_GeomFromGeoJSON(?),4326), ST_SetSRID(ST_GeomFromGeoJSON(?),4326))", Boolean.class, areaGeoJson, predictedGeoJson);
+                    if (containsCentroid != null && containsCentroid) {
+                        confidence += 0.1;
+                        if (!reason.startsWith("syntactic")) reason = "predicted_in_area";
+                    }
+                } catch (Exception e) { /* ignore */ }
+            }
+            if (confidence > 1.0) confidence = 1.0;
+            props.put("confidence", confidence);
+            props.put("resolvability_reason", reason);
+
+            // Verified: conservative DB-backed verification OR syntactic+area containment
+            // If we computed a centroid from checkins above, treat the prediction as verified
+            boolean verified = false;
+            try {
+                boolean dbv = dbVerifyAddressById(addressId);
+                if (centroidRaw != null) {
+                    verified = true;
+                } else if (dbv) {
+                    verified = true;
+                } else if (syntacticExact && areaGeoJson != null) {
+                    Boolean containsCentroid = jdbcTemplate.queryForObject("SELECT ST_Contains(ST_SetSRID(ST_GeomFromGeoJSON(?),4326), ST_SetSRID(ST_GeomFromGeoJSON(?),4326))", Boolean.class, areaGeoJson, predictedGeoJson);
+                    verified = containsCentroid != null && containsCentroid;
+                }
+            } catch (Exception e) { /* ignore */ }
+            props.put("verified", verified);
             feature.set("properties", props);
+            try {
+                log.info("predictAddressLocation returning feature for applId={}, addressId={} props={}", applId, addressId, props.toString());
+            } catch (Exception ignore) { }
             return feature;
         } catch (Exception e) {
             log.warn("predictAddressLocation failed for applId={}, addressId={}", applId, addressId, e);
+            return NullNode.instance;
+        }
+    }
+
+    // Helper: run reverseLookupByPoint but return a simple JsonNode of province/district/ward
+    private com.fasterxml.jackson.databind.JsonNode reverseLookupByPointAsJson(String pointGeoJson) {
+        try {
+            // parse coordinates from pointGeoJson and call reverseLookupByPoint
+            com.fasterxml.jackson.databind.JsonNode g = objectMapper.readTree(pointGeoJson);
+            if (g == null || !g.has("coordinates")) return NullNode.instance;
+            com.fasterxml.jackson.databind.JsonNode coords = g.get("coordinates");
+            double lon = coords.get(0).asDouble();
+            double lat = coords.get(1).asDouble();
+            java.util.Map<String, Object> m = reverseLookupByPoint(lon, lat);
+            com.fasterxml.jackson.databind.node.ObjectNode out = objectMapper.createObjectNode();
+            if (m.containsKey("provinceId")) out.put("provinceId", String.valueOf(m.get("provinceId")));
+            if (m.containsKey("provinceName")) out.put("provinceName", String.valueOf(m.get("provinceName")));
+            if (m.containsKey("districtId")) out.put("districtId", String.valueOf(m.get("districtId")));
+            if (m.containsKey("districtName")) out.put("districtName", String.valueOf(m.get("districtName")));
+            if (m.containsKey("wardId")) out.put("wardId", String.valueOf(m.get("wardId")));
+            if (m.containsKey("wardName")) out.put("wardName", String.valueOf(m.get("wardName")));
+            return out;
+        } catch (Exception e) {
             return NullNode.instance;
         }
     }

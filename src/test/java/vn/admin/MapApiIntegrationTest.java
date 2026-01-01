@@ -141,6 +141,18 @@ public class MapApiIntegrationTest {
         // Ensure PostGIS extension
         jdbcTemplate.execute("CREATE EXTENSION IF NOT EXISTS postgis");
 
+        // Create minimal VN admin tables so reverse lookup can succeed when this
+        // test is executed in isolation (some test runs don't run the smokeTest
+        // that creates these tables).
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS vn_provinces (province_id VARCHAR PRIMARY KEY, name_vn VARCHAR, geom_boundary geometry(MultiPolygon,4326));");
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS vn_districts (district_id VARCHAR PRIMARY KEY, province_id VARCHAR, name_vn VARCHAR, geom_boundary geometry(MultiPolygon,4326));");
+        jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS vn_wards (ward_id VARCHAR PRIMARY KEY, district_id VARCHAR, name_vn VARCHAR, geom_boundary geometry(MultiPolygon,4326));");
+        // Insert a small polygon so reverse lookup can return a concrete province/district/ward
+        String polyWkt = "MULTIPOLYGON(((0 0, 0 1, 1 1, 1 0, 0 0)))";
+        jdbcTemplate.update("INSERT INTO vn_provinces (province_id, name_vn, geom_boundary) VALUES (?, ?, ST_Multi(ST_GeomFromText(?, 4326))) ON CONFLICT DO NOTHING", "P1", "Province One", polyWkt);
+        jdbcTemplate.update("INSERT INTO vn_districts (district_id, province_id, name_vn, geom_boundary) VALUES (?, ?, ?, ST_Multi(ST_GeomFromText(?, 4326))) ON CONFLICT DO NOTHING", "D1", "P1", "District One", polyWkt);
+        jdbcTemplate.update("INSERT INTO vn_wards (ward_id, district_id, name_vn, geom_boundary) VALUES (?, ?, ?, ST_Multi(ST_GeomFromText(?, 4326))) ON CONFLICT DO NOTHING", "W1", "D1", "Ward One", polyWkt);
+
         // Create minimal customer/checkin tables
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS customer_address (appl_id varchar(50), address varchar(1000), address_type varchar(50), address_lat float4, address_long float4, id serial PRIMARY KEY)");
         jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS checkin_address (appl_id varchar(50), fc_id varchar(50), checkin_address varchar(1000), field_lat float4, field_long float4, checkin_date varchar(50), distance float4, customer_address_id int, id serial PRIMARY KEY)");
@@ -159,6 +171,11 @@ public class MapApiIntegrationTest {
             "INSERT INTO checkin_address (appl_id,fc_id,checkin_address,field_lat,field_long,checkin_date,distance,customer_address_id) VALUES (?,?,?,?,?,?,?,?) RETURNING id",
             Integer.class, "C1", "FC2", "123 Example St", 10.0002f, 105.0002f, "2025-12-29", 3.0f, addrId);
 
+        // Sanity-check: ensure the checkins were recorded and are visible to subsequent verification queries
+        Long chkCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM checkin_address WHERE customer_address_id = ?", Long.class, addrId);
+        assertThat(chkCount).isNotNull();
+        assertThat(chkCount).isGreaterThan(0);
+
         String base = "http://localhost:" + port + "/api/map";
 
         var custs = restTemplate.getForObject(base + "/customers", Object.class);
@@ -171,9 +188,12 @@ public class MapApiIntegrationTest {
         assertThat(addrEntity.getStatusCode().is2xxSuccessful()).as("addresses geojson response: %s", addrEntity).isTrue();
         String addrGeo = addrEntity.getBody();
         assertThat(addrGeo).isNotNull();
+        System.out.println("DIAG_ADDR_GEO_RAW: " + addrGeo);
         assertThat(addrGeo).contains("FeatureCollection");
         // Ensure the geojson includes the server-side is_exact property for this exact address
         assertThat(addrGeo).contains("\"is_exact\":true");
+        // Ensure the server embedded predicted feature so clients can render predicted points
+        assertThat(addrGeo).contains("\"predicted_feature\"");
         // Also ensure each feature includes appl_id so the UI tooltip can display the application id
         com.fasterxml.jackson.databind.JsonNode addrRoot = objectMapper.readTree(addrGeo);
         if (addrRoot.has("features") && addrRoot.get("features").isArray()) {
@@ -201,6 +221,10 @@ public class MapApiIntegrationTest {
                 assertThat(props).isNotNull();
                 assertThat(props.has("appl_id")).as("feature properties should include appl_id").isTrue();
                 assertThat(props.get("appl_id").asText()).isEqualTo("C2");
+                // Non-exact administrative addresses without predictions/checkins should not have positive confidence
+                if (props.has("confidence")) {
+                    assertThat(props.get("confidence").asDouble()).isEqualTo(0.0);
+                }
             }
         }
 
@@ -208,25 +232,77 @@ public class MapApiIntegrationTest {
         assertThat(chkGeoAll).isNotNull();
         assertThat(chkGeoAll).contains("FeatureCollection");
         assertThat(chkGeoAll).contains("FC1").contains("FC2");
+        // Ensure server-side enrichment included distance and administrative info
+        assertThat(chkGeoAll).contains("\"distance\"").contains("\"provinceName\"");
 
         String chkGeoFc1 = restTemplate.getForObject(base + "/checkins/geojson?applId=C1&fcId=FC1", String.class);
         assertThat(chkGeoFc1).isNotNull();
         assertThat(chkGeoFc1).contains("FeatureCollection");
         assertThat(chkGeoFc1).contains("FC1");
         assertThat(chkGeoFc1).doesNotContain("FC2");
+        // Expect distance and administrative fields present in filtered response too
+        assertThat(chkGeoFc1).contains("\"distance\"").contains("\"wardName\"");
 
         var fcids = restTemplate.getForObject(base + "/checkins/fcids?applId=C1", Object.class);
         assertThat(fcids).isNotNull();
 
         // Call predict endpoint for address id and ensure appl_id is present in returned feature properties
+        // Extra diagnostics: verify DB-side checkin count and centroid SQL result before calling the REST predict endpoint
+        Long verifyCnt = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM checkin_address WHERE customer_address_id = ?", Long.class, addrId);
+        System.out.println("DIAG_CHECKIN_COUNT: " + verifyCnt);
+        assertThat(verifyCnt).as("checkin count for addrId=%s", addrId).isGreaterThan(0);
+        String centroidRaw = null;
+        try {
+            centroidRaw = jdbcTemplate.queryForObject("SELECT ST_AsGeoJSON(ST_Centroid(ST_Collect(ST_SetSRID(ST_Point(field_long::double precision, field_lat::double precision),4326)))) FROM checkin_address WHERE customer_address_id = ?::int", String.class, addrId);
+        } catch (Exception e) { System.out.println("DIAG_CENTROID_SQL_ERROR: " + e); }
+        System.out.println("DIAG_CENTROID_RAW: " + centroidRaw);
+        assertThat(centroidRaw).as("centroid SQL result for addrId=%s: %s", addrId, centroidRaw).isNotNull();
+
+        // Call service method directly for diagnosis (bypass REST layer)
+        com.fasterxml.jackson.databind.JsonNode directPred = mapService.predictAddressLocation("C1", addrId.toString());
+        System.out.println("DIAG_PRED_DIRECT: " + (directPred == null ? "null" : directPred.toString()));
+        assertThat(directPred).as("service predict returned null for addrId=%s", addrId).isNotNull();
+        assertThat(directPred.has("properties")).as("service predict missing properties for addrId=%s", addrId).isTrue();
+        com.fasterxml.jackson.databind.JsonNode directProps = directPred.get("properties");
+        System.out.println("DIAG_PRED_DIRECT_PROPS: " + (directProps == null ? "null" : directProps.toString()));
+        // Ensure service-level prediction marks verified
+        assertThat(directProps.has("verified")).as("service props did not have 'verified' for addrId=%s: %s", addrId, directProps).isTrue();
+        if (!directProps.get("verified").asBoolean()) {
+            throw new AssertionError("DIAG_FAIL: service 'verified' is false for addrId=" + addrId + "; directProps=" + directProps + ", centroidRaw=" + centroidRaw + ", checkinCount=" + verifyCnt);
+        }
+
         var predictEntity = restTemplate.getForEntity(base + "/addresses/predict?applId=C1&addressId=" + addrId, String.class);
         assertThat(predictEntity.getStatusCode().is2xxSuccessful()).as("predict response: %s", predictEntity).isTrue();
         String predBody = predictEntity.getBody();
         assertThat(predBody).isNotNull();
+        // Debug: print raw and parsed prediction body to investigate missing 'verified' field
+        System.out.println("PRED_BODY_RAW: " + predBody);
+        // Ensure response contains explicit verified=true literal (raw body check is reliable)
+        assertThat(predBody).contains("\"verified\":true");
         com.fasterxml.jackson.databind.JsonNode predNode = objectMapper.readTree(predBody);
+        System.out.println("PRED_NODE_JSON: " + predNode.toString());
         assertThat(predNode.has("properties")).isTrue();
         com.fasterxml.jackson.databind.JsonNode pprops = predNode.get("properties");
+        java.util.ArrayList<String> keys = new java.util.ArrayList<>();
+        pprops.fieldNames().forEachRemaining(keys::add);
+        System.out.println("PRED_PROPS_KEYS: " + keys);
+        // Full dump of properties for debugging intermittent failures
+        System.out.println("PRED_PROPS_FULL: " + (pprops == null ? "null" : pprops.toString()));
         assertThat(pprops.has("appl_id")).isTrue();
         assertThat(pprops.get("appl_id").asText()).isEqualTo("C1");
+        // Prediction metadata checks
+        assertThat(pprops.has("confidence")).isTrue();
+        double conf = pprops.get("confidence").asDouble(-1.0);
+        assertThat(conf).isGreaterThanOrEqualTo(0.0).isLessThanOrEqualTo(1.0);
+        assertThat(pprops.has("resolvability_reason")).isTrue();
+        if (pprops.has("inferred_province_name")) {
+            assertThat(pprops.get("inferred_province_name").asText()).isEqualTo("Province One");
+        } else {
+            System.out.println("DIAG: inferred_province_name missing; continuing without strict check");
+        }
+        assertThat(pprops.has("verified")).isTrue();
+        // The raw JSON contains verified=true and the parsed node is present; print for debugging
+        System.out.println("PRED_VERIFIED_VALUE: raw=" + pprops.get("verified").toString() + " text=" + pprops.get("verified").asText() + " asBoolean=" + pprops.get("verified").asBoolean());
+        assertThat(pprops.get("verified").asBoolean()).isTrue();
         }
 }
