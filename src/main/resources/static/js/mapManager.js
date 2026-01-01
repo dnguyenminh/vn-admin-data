@@ -41,7 +41,8 @@ export default class MapManager {
                 <div style="font-weight:600; margin-bottom:6px;">Map legend</div>
                 <div class="legend-item"><span class="legend-swatch" style="background:#1abc9c;"></span><div>Exact address</div></div>
                 <div class="legend-item"><span class="legend-swatch" style="background:#e74c3c;"></span><div>Non-exact / ambiguous address</div></div>
-                <div class="legend-item"><span class="legend-swatch predicted-swatch">📍</span><div>Predicted location</div></div>
+                <div class="legend-item"><span class="legend-swatch predicted-swatch">📍</span><div>Predicted address</div></div>
+                <div class="legend-item"><span class="legend-swatch predicted-swatch">🔮</span><div>Predicted FC location</div></div>
             `;
             // Prevent clicks on the legend from propagating to the map (avoid accidental pans)
             L.DomEvent.disableClickPropagation(div);
@@ -186,7 +187,14 @@ export default class MapManager {
             const coords = feature.geometry.coordinates;
             if (!coords || coords.length < 2) return;
             const latlng = [coords[1], coords[0]];
-            const marker = L.marker(latlng, { title: 'Predicted address', icon: L.divIcon({ className: 'predicted-marker', html: '📍', iconSize: [24, 24] }) });
+            // Use a distinct crystal-ball icon for predicted locations so it matches the
+            // UI control and is visually distinct from regular checkin markers.
+            // Choose icon and title based on feature properties. Address-embedded predictions
+            // use the location pin (📍), while FC-generated predictions use the crystal ball (🔮).
+            const isFcPrediction = props && (props.fc_id || props.areaLevel === 'fc_prediction');
+            const iconHtml = isFcPrediction ? '🔮' : '📍';
+            const titleText = isFcPrediction ? 'Predicted FC location' : 'Predicted address';
+            const marker = L.marker(latlng, { title: titleText, icon: L.divIcon({ className: 'predicted-marker', html: iconHtml, iconSize: [24, 24] }) });
             const props = feature.properties || {};
             let html = `<div><strong>Predicted</strong><br/>appl_id: ${props.appl_id || props.applId || ''}<br/>addressId: ${props.addressId || ''}<br/>adjusted: ${props.adjusted || false}<br/>areaLevel: ${props.areaLevel || ''}</div>`;
             marker.bindPopup(html);

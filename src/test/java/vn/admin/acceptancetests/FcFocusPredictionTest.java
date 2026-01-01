@@ -43,6 +43,9 @@ public class FcFocusPredictionTest {
         // Ensure FC combobox button exists and simulate selecting FC_TEST
         js.executeScript("(function(){ try{ var el = document.getElementById('fcCombo'); if(el){ el.value='FC_TEST'; el.dataset.selectedId='FC_TEST'; } return true;}catch(e){return false;} })();");
 
+        // Ensure no predicted marker is present at start (clear any previous predictions)
+        js.executeScript("(function(){ try{ if(window.app && window.app.map && typeof window.app.map.clearPredicted === 'function'){ window.app.map.clearPredicted(); } return true;}catch(e){return false;} })();");
+
         // Click the focus button: should show checkins (and not show predicted marker)
         js.executeScript("(function(){ try{ var b = document.getElementById('focusFcBtn'); if(b) b.click(); return true;}catch(e){return false;} })();");
 
@@ -59,12 +62,12 @@ public class FcFocusPredictionTest {
 
         wait.until(d -> {
             try {
-                Object present = js.executeScript("return document.querySelector('.predicted-marker') !== null;");
-                return Boolean.TRUE.equals(present);
+                Object ok = js.executeScript("var el = document.querySelector('.predicted-marker'); return el && el.innerText && el.innerText.indexOf('🔮') >= 0;");
+                return Boolean.TRUE.equals(ok);
             } catch (Throwable t) { return false; }
         });
 
         Object pred = js.executeScript("return document.querySelector('.predicted-marker') ? document.querySelector('.predicted-marker').innerText : null;");
-        assertTrue(pred != null, "Predicted marker should be present after clicking the Show predicted button");
+        assertTrue(pred != null && String.valueOf(pred).indexOf('🔮') >= 0, "Predicted marker should display 🔮 after clicking the Show predicted button, got: " + pred);
     }
 }
