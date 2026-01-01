@@ -41,8 +41,8 @@ export default class MapManager {
                 <div style="font-weight:600; margin-bottom:6px;">Map legend</div>
                 <div class="legend-item"><span class="legend-swatch" style="background:#1abc9c;"></span><div>Exact address</div></div>
                 <div class="legend-item"><span class="legend-swatch" style="background:#e74c3c;"></span><div>Non-exact / ambiguous address</div></div>
-                <div class="legend-item"><span class="legend-swatch predicted-swatch">📍</span><div>Predicted address</div></div>
-                <div class="legend-item"><span class="legend-swatch predicted-swatch">🔮</span><div>Predicted FC location</div></div>
+                <div class="legend-item"><span class="legend-swatch predicted-swatch" title="Predicted address (server)">📍</span><div>Predicted address</div></div>
+                <div class="legend-item"><span class="legend-swatch predicted-swatch" title="Predicted FC location (based on checkins)">🔮</span><div>Predicted FC location</div></div>
             `;
             // Prevent clicks on the legend from propagating to the map (avoid accidental pans)
             L.DomEvent.disableClickPropagation(div);
