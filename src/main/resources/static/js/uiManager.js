@@ -24,6 +24,7 @@ export default class UIManager {
         this.showAllCheckinsToggle = document.getElementById('showAllCheckins');
         this.focusAddressBtn = document.getElementById('focusAddressBtn');
         this.focusFcBtn = document.getElementById('focusFcBtn');
+        this.showFcPredBtn = document.getElementById('showFcPredBtn');
 
         this.ignoreInput = false;
 
@@ -413,6 +414,11 @@ export default class UIManager {
     bindFocusFc(onClick) {
         if (!this.focusFcBtn || typeof onClick !== 'function') return;
         this.focusFcBtn.addEventListener('click', (e) => { e.preventDefault(); onClick(); });
+    }
+
+    bindShowFcPrediction(onClick) {
+        if (!this.showFcPredBtn || typeof onClick !== 'function') return;
+        this.showFcPredBtn.addEventListener('click', (e) => { e.preventDefault(); onClick(); });
     }
 
     showFcResults(list, append = false) {

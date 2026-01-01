@@ -158,14 +158,40 @@ export default class App {
             const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
             const fcId = this.selectedFcId || this.ui.getSelectedFcId();
             if (!applId || !fcId) return;
+            // Load and show the selected FC's checkins, then fit to their bounds
             const checkins = await this.api.getCheckinsGeoJson(applId, fcId, 0, 1000);
-            // If there are features, focus to the first feature
+            try {
+                this.map.showCheckinsGeojson(checkins);
+                const features = (checkins && checkins.features) ? checkins.features : [];
+                if (features.length > 0) {
+                    // compute an array of [lat, lng] for bounds
+                    const latlngs = features.map(f => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
+                    try { if (this.map && this.map.map && latlngs.length > 0) this.map.map.fitBounds(latlngs, { padding: [30, 30] }); } catch (e) { /* ignore */ }
+                }
+            } catch (e) { /* ignore */ }
+        });
+
+        // bind show-predicted-for-fc button
+        this.ui.bindShowFcPrediction(async () => {
+            const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+            const fcId = this.selectedFcId || this.ui.getSelectedFcId();
+            if (!applId || !fcId) return;
+            const checkins = await this.api.getCheckinsGeoJson(applId, fcId, 0, 1000);
             try {
                 const features = (checkins && checkins.features) ? checkins.features : [];
-                if (features.length > 0 && features[0].geometry && features[0].geometry.coordinates) {
-                    const c = features[0].geometry.coordinates; // [lng, lat]
-                    this.map.focusToLatLng(c[1], c[0], 16);
-                }
+                if (features.length === 0) return;
+                let sumLat = 0, sumLng = 0, count = 0;
+                features.forEach(f => {
+                    try {
+                        const c = f.geometry && f.geometry.coordinates;
+                        if (c && c.length >= 2) { sumLng += c[0]; sumLat += c[1]; count++; }
+                    } catch (e) { /* ignore */ }
+                });
+                if (count === 0) return;
+                const avgLng = sumLng / count;
+                const avgLat = sumLat / count;
+                const fakeFeature = { geometry: { coordinates: [avgLng, avgLat] }, properties: { appl_id: applId, fc_id: fcId, adjusted: true, areaLevel: 'fc_prediction' } };
+                this.map.showPredictedAddress(fakeFeature);
             } catch (e) { /* ignore */ }
         });
         // bind address combobox
