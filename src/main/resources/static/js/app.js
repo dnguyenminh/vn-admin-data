@@ -366,6 +366,25 @@ class App {
         this.map.showAddressesGeojson(addrGeo);
         try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
 
+        // Update 'Show predicted' button enabled state based on the currently-selected address
+        try {
+            const selAddr = this.selectedAddressId || this.ui.getSelectedAddressId();
+            if (selAddr) {
+                const isExact = !!(this.map._addressExactById && this.map._addressExactById[String(selAddr)]);
+                this.ui.setShowFcPredEnabled(!isExact);
+            } else {
+                // If only one address exists for this customer and it's exact, disable the button
+                try {
+                    const items = (addressesResp && addressesResp.items) ? addressesResp.items : (addressesResp || []);
+                    if (items && items.length === 1) {
+                        const only = items[0];
+                        const exactOnly = !!(only && (only.is_exact === true || String(only.is_exact) === 'true'));
+                        this.ui.setShowFcPredEnabled(!exactOnly);
+                    }
+                } catch (e) { /* ignore */ }
+            }
+        } catch (e) { /* ignore */ }
+
         const checkinsGeo = await this.api.getCheckinsGeoJson(applId, '', 0, 1000); // page checkins with reasonable default
         this.map.showCheckinsGeojson(checkinsGeo);
         try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
