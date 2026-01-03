@@ -402,6 +402,11 @@ class App {
         }
         // Highlight and center address
         this.map.highlightAddress(addrId, { fit: true });
+        // Update Show Predicted button: disable when selected address is exact
+        try {
+            const isExact = !!(this.map._addressExactById && this.map._addressExactById[String(addrId)]);
+            this.ui.setShowFcPredEnabled(!isExact);
+        } catch (e) { /* ignore */ }
         // Filter checkins to this address
         this.map.filterCheckinsByAddressId(addrId);
 

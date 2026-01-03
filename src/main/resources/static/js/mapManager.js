@@ -372,12 +372,45 @@ class MapManager {
         this._layersReady = false; try { window.__map_layers_ready = false; } catch (e) { }
         // geojson features expected to have properties: id, fc_id, customer_address_id, checkin_date
         this.clearCheckins();
+        // Determine last checkin per FC (by checkin_date if present, else by id)
+        const lastByFc = {};
+        try {
+            (geojson.features || []).forEach(f => {
+                try {
+                    const fc = (f.properties && f.properties.fc_id) || '';
+                    const cur = lastByFc[fc];
+                    if (!cur) { lastByFc[fc] = f; return; }
+                    const da = (f.properties && f.properties.checkin_date) || '';
+                    const db = (cur.properties && cur.properties.checkin_date) || '';
+                    if (da && db) {
+                        if (da > db) lastByFc[fc] = f;
+                    } else if ((f.properties && f.properties.id) && (cur.properties && cur.properties.id)) {
+                        if (Number(f.properties.id) > Number(cur.properties.id)) lastByFc[fc] = f;
+                    }
+                } catch (e) { /* ignore */ }
+            });
+        } catch (e) { /* ignore */ }
+
         geojson.features.forEach(feature => {
             const latlng = [feature.geometry.coordinates[1], feature.geometry.coordinates[0]];
             const fc = (feature.properties && feature.properties.fc_id) || '';
+            const isLastForFc = lastByFc[fc] && feature.properties && String(feature.properties.id) === String(lastByFc[fc].properties && lastByFc[fc].properties.id);
             const color = this._getColorForFc(fc);
-            const marker = L.circleMarker(latlng, { radius: 6, color, fillColor: color, fillOpacity: 0.9 });
+            let marker;
+            if (isLastForFc) {
+                // Render last checkin with pin icon to match legend and focus button
+                marker = L.marker(latlng, { icon: L.divIcon({ className: 'last-checkin', html: '📍', iconSize: [18, 18] }), zIndexOffset: 1000 });
+            } else {
+                marker = L.circleMarker(latlng, { radius: 6, color, fillColor: color, fillOpacity: 0.9 });
+            }
             marker.featureProps = feature.properties || {};
+            // Ensure last-checkin markers are visually above other markers
+            try {
+                if (isLastForFc && marker && typeof marker.setZIndexOffset === 'function') {
+                    try { marker.setZIndexOffset(1000); } catch (e) { /* ignore */ }
+                    try { if (marker.bringToFront) marker.bringToFront(); } catch (e) { /* ignore */ }
+                }
+            } catch (e) { /* ignore */ }
             // Build popup
             const p = marker.featureProps;
             let html = `<div><strong>fc_id:</strong> ${this._escapeHtml(p.fc_id)}<br/><strong>appl_id:</strong> ${this._escapeHtml(p.appl_id)}<br/><strong>customer_address_id:</strong> ${this._escapeHtml(p.customer_address_id)}<br/><strong>location(lat, long):</strong> (${latlng[0].toFixed(6)}, ${latlng[1].toFixed(6)})<br/>`;
