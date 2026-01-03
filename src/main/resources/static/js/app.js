@@ -367,7 +367,7 @@ class App {
                     // Ensure we also re-highlight address marker now that we refreshed addresses
                     try { if (this.selectedAddressId) this.map.highlightAddress(this.selectedAddressId, { fit: false }); } catch (e) { /* ignore */ }
                     // Finally update the Show Predicted button according to the discovered exactness
-                    try { console.log('[App] before final setShowFcPredEnabled, addrId=', addrId, 'isExact=', isExact, 'map._addressExactById=', this.map._addressExactById); this.ui.setShowFcPredEnabled(!isExact); } catch (e) { /* ignore */ }
+                    try { console.log('[App] before final setShowFcPredEnabled, addrId=', addrId, 'isExact=', isExact, 'map._addressExactById=', this.map._addressExactById); await this.updateShowFcPredEnabled(); } catch (e) { /* ignore */ }
                 } catch (e) { /* ignore */ }
             });
         } catch (e) { /* ignore */ }
@@ -396,6 +396,54 @@ class App {
         this.ui.populateAddresses(resp);
     }
 
+    // Centralized logic to compute whether Show Predicted button should be enabled.
+    // Factors: selectedAddress exactness (if exact -> disabled), selected Fc checkin variety (if fc selected and checkins <=1 -> disabled),
+    // or if only one address exists and it's exact -> disabled.
+    async updateShowFcPredEnabled() {
+        try {
+            const appl = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+            const addrId = this.selectedAddressId || this.ui.getSelectedAddressId();
+            const fcId = this.selectedFcId || this.ui.getSelectedFcId();
+
+            // If selected address is known exact, always disable
+            try {
+                if (addrId && this.map && this.map._addressExactById && this.map._addressExactById[String(addrId)]) {
+                    this.ui.setShowFcPredEnabled(false);
+                    return;
+                }
+            } catch (e) { /* ignore */ }
+
+            // If fc selected, determine checkin count to decide
+            if (appl && fcId) {
+                try {
+                    const checkins = await this.api.getCheckinsGeoJson(appl, fcId, 0, 1000);
+                    const cnt = (checkins && checkins.features) ? checkins.features.length : 0;
+                    if (cnt <= 1) { this.ui.setShowFcPredEnabled(false); return; }
+                    // otherwise, enable (subject to address exactness already checked)
+                    this.ui.setShowFcPredEnabled(true);
+                    return;
+                } catch (e) { /* ignore */ }
+            }
+
+            // If no fc selected, but only one address exists and it's exact, disable
+            if (appl && !addrId) {
+                try {
+                    const resp = await this.api.getAddresses(appl, '', 0, this.addressesSize || 50);
+                    const items = (resp && resp.items) ? resp.items : (resp || []);
+                    if (items && items.length === 1) {
+                        const only = items[0];
+                        const exactOnly = !!(only && (only.is_exact === true || String(only.is_exact) === 'true'));
+                        this.ui.setShowFcPredEnabled(!exactOnly);
+                        return;
+                    }
+                } catch (e) { /* ignore */ }
+            }
+
+            // Default: enable
+            try { this.ui.setShowFcPredEnabled(true); } catch (e) { /* ignore */ }
+        } catch (e) { /* ignore */ }
+    }
+
     async handleCustomerChange(applId) {
         if (!applId) {
             // clear related UI and layers
@@ -417,23 +465,9 @@ class App {
         this.map.showAddressesGeojson(addrGeo);
         try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
 
-        // Update 'Show predicted' button enabled state based on the currently-selected address
+        // Update 'Show predicted' button enabled state based on current app state
         try {
-            const selAddr = this.selectedAddressId || this.ui.getSelectedAddressId();
-            if (selAddr) {
-                const isExact = !!(this.map._addressExactById && this.map._addressExactById[String(selAddr)]);
-                this.ui.setShowFcPredEnabled(!isExact);
-            } else {
-                // If only one address exists for this customer and it's exact, disable the button
-                try {
-                    const items = (addressesResp && addressesResp.items) ? addressesResp.items : (addressesResp || []);
-                    if (items && items.length === 1) {
-                        const only = items[0];
-                        const exactOnly = !!(only && (only.is_exact === true || String(only.is_exact) === 'true'));
-                        this.ui.setShowFcPredEnabled(!exactOnly);
-                    }
-                } catch (e) { /* ignore */ }
-            }
+            await this.updateShowFcPredEnabled();
         } catch (e) { /* ignore */ }
 
         const checkinsGeo = await this.api.getCheckinsGeoJson(applId, '', 0, 1000); // page checkins with reasonable default
@@ -483,11 +517,9 @@ class App {
             } catch (e) { console.warn('Fallback load for address failed', e); }
         }
 
-        // Update Show Predicted button: disable when selected address is exact
+        // Update Show Predicted button: use centralized logic
         try {
-            const isExact = !!(this.map._addressExactById && this.map._addressExactById[String(addrId)]);
-            console.log('[App] before first setShowFcPredEnabled, addrId=', addrId, 'isExact=', isExact, 'map._addressExactById=', this.map._addressExactById);
-            this.ui.setShowFcPredEnabled(!isExact);
+            await this.updateShowFcPredEnabled();
         } catch (e) { /* ignore */ }
         // Filter checkins to this address
         this.map.filterCheckinsByAddressId(addrId);
@@ -548,34 +580,15 @@ class App {
             }
         } catch (e) { /* ignore */ }
 
-        // Enable/disable 'Show predicted' button: disable when the selected address is exact because
-        // an exact address has no prediction per app logic.
-        try {
-            const isExact = !!(this.map._addressExactById && this.map._addressExactById[String(addrId)]);
-            this.ui.setShowFcPredEnabled(!isExact);
-        } catch (e) { /* ignore UI failures */ }
+        // Enable/disable 'Show predicted' button: use centralized logic
+        try { await this.updateShowFcPredEnabled(); } catch (e) { /* ignore UI failures */ }
     }
 
     async handleFcChange(fcId) {
         // filter checkins by fc
         this.map.filterCheckinsByFcId(fcId);
-        // Disable/enable the Show Predicted button when there's insufficient variation in checkins
-        try {
-            const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
-            if (!applId || !fcId) return;
-            const checkins = await this.api.getCheckinsGeoJson(applId, fcId, 0, 1000);
-            const cnt = (checkins && checkins.features) ? checkins.features.length : 0;
-            // If only one checking location, predicted address will equal the customer address -> disable
-            let disable = cnt <= 1;
-            // Also force disable if the currently selected address is Exact (Verified)
-            if (!disable && this.selectedAddressId) {
-                try {
-                    const isExact = !!(this.map._addressExactById && this.map._addressExactById[String(this.selectedAddressId)]);
-                    if (isExact) disable = true;
-                } catch (e) { /* ignore */ }
-            }
-            this.ui.setShowFcPredEnabled(!disable);
-        } catch (e) { /* ignore */ }
+        // Recompute Show Predicted enabled state since fc changed
+        try { await this.updateShowFcPredEnabled(); } catch (e) { /* ignore */ }
     }
 
     async handleProvinceChange(pid) {
