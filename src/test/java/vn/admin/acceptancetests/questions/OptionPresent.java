@@ -6,7 +6,7 @@ import net.serenitybdd.screenplay.Question;
 import net.serenitybdd.screenplay.targets.Target;
 import org.openqa.selenium.By;
 
-import java.util.List;
+// explicit java.util.List not required (we use fully-qualified type for clarity)
 
 public class OptionPresent implements Question<Boolean> {
     private final Target select;
@@ -24,7 +24,7 @@ public class OptionPresent implements Question<Boolean> {
     @Override
     public Boolean answeredBy(Actor actor) {
         WebElementFacade element = select.resolveFor(actor);
-        List options = element.findElements(By.xpath(".//option[normalize-space(text())='" + optionText + "']"));
+        java.util.List<org.openqa.selenium.WebElement> options = element.findElements(By.xpath(".//option[normalize-space(text())='" + optionText + "']"));
         return !options.isEmpty();
     }
 }

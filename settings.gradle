@@ -1,9 +1,6 @@
-plugins {
-    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
-}
 
 rootProject.name = 'vn-admin-data'
 
-// Multi-module: root is the existing CLI project, add a 'web' subproject
 include 'web'
 project(':web').projectDir = file('web')
+

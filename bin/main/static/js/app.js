@@ -1,8 +1,4 @@
-import ApiClient from './apiClient.js';
-import MapManager from './mapManager.js';
-import UIManager from './uiManager.js';
-
-export default class App {
+class App {
     constructor() {
         this.api = ApiClient;
         this.ui = new UIManager();
@@ -10,6 +6,24 @@ export default class App {
 
         this._wireEvents();
         this._init();
+    }
+
+    _escapeHtml(str) {
+        if (!str && str !== 0) return '';
+        return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    logToPage(msg) {
+        const div = document.getElementById('logConsole');
+        if (div) {
+            div.innerHTML += new Date().toLocaleTimeString() + ': ' + this._escapeHtml(msg) + '<br>';
+            div.scrollTop = div.scrollHeight;
+        }
     }
 
     _wireEvents() {
@@ -43,6 +57,8 @@ export default class App {
     }
 
     async _init() {
+        if (this.initialized) return; // Prevent double initialization
+        this.initialized = true;
         console.log('App initialized');
         const provinces = await this.api.getProvinces();
         this.ui.populateProvinces(provinces);
@@ -106,10 +122,14 @@ export default class App {
             if (checked) {
                 const checkins = await this.api.getCheckinsGeoJson(applId, '', 0, 1000);
                 this.map.showCheckinsGeojson(checkins);
+                try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
+                try { if (this.map && this.map.map && typeof this.map.map.invalidateSize === 'function') this.map.map.invalidateSize(); } catch (e) { }
             } else {
                 if (this.selectedFcId) {
                     const checkins = await this.api.getCheckinsGeoJson(applId, this.selectedFcId, 0, 1000);
                     this.map.showCheckinsGeojson(checkins);
+                    try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
+                    try { if (this.map && this.map.map && typeof this.map.map.invalidateSize === 'function') this.map.map.invalidateSize(); } catch (e) { }
                 } else {
                     this.map.clearCheckins();
                 }
@@ -124,6 +144,7 @@ export default class App {
             // ensure address markers are present, then highlight
             const addrGeo = await this.api.getAddressesGeoJson(applId, 0, this.addressesSize || 50);
             this.map.showAddressesGeojson(addrGeo);
+            try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
             const ok = this.map.highlightAddress(addrId, { fit: true });
             if (!ok) {
                 // fallback: fetch addresses list and center on lat/lng if available
@@ -137,14 +158,18 @@ export default class App {
             try {
                 // Prefer embedded prediction on the currently-loaded address layer to avoid an extra request
                 let embeddedPred = null;
-                this.map.addressLayer.eachLayer(al => {
-                    try {
-                        const id = al.feature && al.feature.properties && al.feature.properties.id;
-                        if (String(id) === String(addrId) && al.feature.properties && al.feature.properties.predicted_feature) {
-                            embeddedPred = al.feature.properties.predicted_feature;
-                        }
-                    } catch (e) { /* ignore */ }
-                });
+                try {
+                    const markers = this.map._addressMarkersById || {};
+                    Object.values(markers).forEach(al => {
+                        try {
+                            const id = al.feature && al.feature.properties && al.feature.properties.id || (al.featureProps && al.featureProps.id);
+                            const props = al.feature && al.feature.properties ? al.feature.properties : (al.featureProps || {});
+                            if (String(id) === String(addrId) && props && props.predicted_feature) {
+                                embeddedPred = props.predicted_feature;
+                            }
+                        } catch (e) { /* ignore */ }
+                    });
+                } catch (e) { /* ignore */ }
                 if (embeddedPred) {
                     this.map.showPredictedAddress(embeddedPred);
                 } else {
@@ -152,23 +177,70 @@ export default class App {
                     if (pred && pred.geometry) this.map.showPredictedAddress(pred);
                 }
             } catch (e) { /* ignore prediction errors */ }
+
+            // Additionally: if there are checkins associated with this address, select the
+            // FC that last checked in here and show its checkins so subsequent FC-focused
+            // actions (e.g., "show all checkins" toggle) behave as users expect.
+            try {
+                const allCheckins = await this.api.getCheckinsGeoJson(applId, '', 0, 1000);
+                const features = (allCheckins && allCheckins.features) ? allCheckins.features : [];
+                const addrCheckins = features.filter(f => String((f.properties && f.properties.customer_address_id) || '') === String(addrId));
+                if (addrCheckins.length > 0) {
+                    // Sort by checkin_date (if present) and pick the latest
+                    addrCheckins.sort((a, b) => { const da = (a.properties && a.properties.checkin_date) || ''; const db = (b.properties && b.properties.checkin_date) || ''; return da < db ? -1 : (da > db ? 1 : 0); });
+                    const last = addrCheckins[addrCheckins.length - 1];
+                    const lastFc = last && last.properties ? last.properties.fc_id : null;
+                    if (lastFc) {
+                        this.selectedFcId = String(lastFc);
+                        try { this.ui.setFcValue(String(lastFc), String(lastFc)); } catch (e) { /* ignore */ }
+                        // Show checkins for this FC and focus to the last checkin location
+                        const fcCheckins = await this.api.getCheckinsGeoJson(applId, this.selectedFcId, 0, 1000);
+                        this.map.showCheckinsGeojson(fcCheckins);
+                        try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
+                        try { if (this.map && this.map.map && typeof this.map.map.invalidateSize === 'function') this.map.map.invalidateSize(); } catch (e) { }
+                        try { const c = last.geometry && last.geometry.coordinates; if (c && c.length >= 2) this.map.focusToLatLng(c[1], c[0], 15); } catch (e) { /* ignore */ }
+                    }
+                }
+            } catch (e) { /* ignore checkin inference errors */ }
         });
 
         this.ui.bindFocusFc(async () => {
             const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
             const fcId = this.selectedFcId || this.ui.getSelectedFcId();
-            if (!applId || !fcId) return;
-            // Load and show the selected FC's checkins, then fit to their bounds
-            const checkins = await this.api.getCheckinsGeoJson(applId, fcId, 0, 1000);
+            this.logToPage('focusFc clicked, applId: ' + applId + ', fcId: ' + fcId);
+            console.log('focusFc clicked, applId:', applId, 'fcId:', fcId);
+            if (!applId || !fcId) {
+                this.logToPage('missing applId or fcId');
+                console.log('missing applId or fcId');
+                return;
+            }
+            // Load and show the selected FC's checkins, then focus on the first one
             try {
+                const checkins = await this.api.getCheckinsGeoJson(applId, fcId, 0, 1000);
+                this.logToPage('checkins loaded: ' + JSON.stringify(checkins).substring(0, 100) + '...');
+                console.log('checkins loaded:', checkins);
                 this.map.showCheckinsGeojson(checkins);
+                try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
+                try { if (this.map && this.map.map && typeof this.map.map.invalidateSize === 'function') this.map.map.invalidateSize(); } catch (e) { }
                 const features = (checkins && checkins.features) ? checkins.features : [];
+                this.logToPage('features length: ' + features.length);
+                console.log('features length:', features.length);
                 if (features.length > 0) {
-                    // compute an array of [lat, lng] for bounds
-                    const latlngs = features.map(f => [f.geometry.coordinates[1], f.geometry.coordinates[0]]);
-                    try { if (this.map && this.map.map && latlngs.length > 0) this.map.map.fitBounds(latlngs, { padding: [30, 30] }); } catch (e) { /* ignore */ }
+                    // Focus on the first checkin
+                    const first = features[0];
+                    const lat = first.geometry.coordinates[1];
+                    const lng = first.geometry.coordinates[0];
+                    this.logToPage('focusing on: ' + lat + ', ' + lng);
+                    console.log('focusing on:', lat, lng);
+                    try { if (this.map && this.map.map) this.map.map.setView([lat, lng], Math.max(this.map.map.getZoom() || 0, 15)); } catch (e) { this.logToPage('setView error: ' + e); console.log('setView error:', e); }
+                } else {
+                    this.logToPage('no checkins to focus on');
+                    console.log('no checkins to focus on');
                 }
-            } catch (e) { /* ignore */ }
+            } catch (e) {
+                this.logToPage('error loading checkins: ' + e);
+                console.log('error loading checkins:', e);
+            }
         });
 
         // bind show-predicted-for-fc button
@@ -245,6 +317,9 @@ export default class App {
                 this.ui.showFcResults(resp, true);
             }
         );
+        // Expose a simple readiness flag for acceptance tests to poll. This becomes true
+        // once the app has completed initial UI and map wiring so tests can avoid race conditions.
+        try { window.__app_ready = true; window.__app = this; } catch (e) { /* ignore */ }
     }
 
     async loadCustomersPage(q, page) {
@@ -275,7 +350,8 @@ export default class App {
             // clear related UI and layers
             this.ui.populateAddresses([]);
             this.ui.populateFcIds([]);
-            this.map.addressLayer.clearLayers();
+            // clear address markers
+            this.map.showAddressesGeojson({ type: 'FeatureCollection', features: [] });
             this.map.clearCheckins();
             this.map.clearPredicted();
             return;
@@ -288,9 +364,11 @@ export default class App {
 
         const addrGeo = await this.api.getAddressesGeoJson(applId, 0, this.addressesSize || 50);
         this.map.showAddressesGeojson(addrGeo);
+        try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
 
         const checkinsGeo = await this.api.getCheckinsGeoJson(applId, '', 0, 1000); // page checkins with reasonable default
         this.map.showCheckinsGeojson(checkinsGeo);
+        try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
 
         const fcids = await this.api.getCheckinFcIds(applId);
         this.ui.populateFcIds(fcids);
@@ -344,14 +422,18 @@ export default class App {
         try {
             // prefer embedded prediction if present on the currently-loaded address layer
             let embeddedPred = null;
-            this.map.addressLayer.eachLayer(al => {
-                try {
-                    const id = al.feature && al.feature.properties && al.feature.properties.id;
-                    if (String(id) === String(addrId) && al.feature.properties && al.feature.properties.predicted_feature) {
-                        embeddedPred = al.feature.properties.predicted_feature;
-                    }
-                } catch (e) { /* ignore */ }
-            });
+            try {
+                const markers = this.map._addressMarkersById || {};
+                Object.values(markers).forEach(al => {
+                    try {
+                        const id = al.feature && al.feature.properties && al.feature.properties.id || (al.featureProps && al.featureProps.id);
+                        const props = al.feature && al.feature.properties ? al.feature.properties : (al.featureProps || {});
+                        if (String(id) === String(addrId) && props && props.predicted_feature) {
+                            embeddedPred = props.predicted_feature;
+                        }
+                    } catch (e) { /* ignore */ }
+                });
+            } catch (e) { /* ignore if address markers missing */ }
             if (embeddedPred) {
                 this.map.showPredictedAddress(embeddedPred);
             } else {
@@ -359,11 +441,28 @@ export default class App {
                 if (pred && pred.geometry) this.map.showPredictedAddress(pred);
             }
         } catch (e) { /* ignore */ }
+
+        // Enable/disable 'Show predicted' button: disable when the selected address is exact because
+        // an exact address has no prediction per app logic.
+        try {
+            const isExact = !!(this.map._addressExactById && this.map._addressExactById[String(addrId)]);
+            this.ui.setShowFcPredEnabled(!isExact);
+        } catch (e) { /* ignore UI failures */ }
     }
 
     async handleFcChange(fcId) {
         // filter checkins by fc
         this.map.filterCheckinsByFcId(fcId);
+        // Disable/enable the Show Predicted button when there's insufficient variation in checkins
+        try {
+            const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+            if (!applId || !fcId) return;
+            const checkins = await this.api.getCheckinsGeoJson(applId, fcId, 0, 1000);
+            const cnt = (checkins && checkins.features) ? checkins.features.length : 0;
+            // If only one checking location, predicted address will equal the customer address -> disable
+            const disable = cnt <= 1;
+            this.ui.setShowFcPredEnabled(!disable);
+        } catch (e) { /* ignore */ }
     }
 
     async handleProvinceChange(pid) {

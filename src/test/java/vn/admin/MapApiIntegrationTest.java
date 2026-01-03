@@ -24,6 +24,7 @@ public class MapApiIntegrationTest {
         // so Testcontainers will allow using the PostGIS image as a postgres substitute.
         private static final DockerImageName POSTGIS_IMAGE = DockerImageName.parse("postgis/postgis:15-3.3").asCompatibleSubstituteFor("postgres");
 
+        @SuppressWarnings("resource")
         @org.testcontainers.junit.jupiter.Container
         static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(POSTGIS_IMAGE)
             .withDatabaseName("testdb")
@@ -164,12 +165,15 @@ public class MapApiIntegrationTest {
         assertThat(addrId).isNotNull();
 
         // insert two checkins with different fc_id
+        @SuppressWarnings("unused")
         Integer chk1 = jdbcTemplate.queryForObject(
             "INSERT INTO checkin_address (appl_id,fc_id,checkin_address,field_lat,field_long,checkin_date,distance,customer_address_id) VALUES (?,?,?,?,?,?,?,?) RETURNING id",
             Integer.class, "C1", "FC1", "123 Example St", 10.0001f, 105.0001f, "2025-12-29", 5.0f, addrId);
+        @SuppressWarnings("unused")
         Integer chk2 = jdbcTemplate.queryForObject(
             "INSERT INTO checkin_address (appl_id,fc_id,checkin_address,field_lat,field_long,checkin_date,distance,customer_address_id) VALUES (?,?,?,?,?,?,?,?) RETURNING id",
             Integer.class, "C1", "FC2", "123 Example St", 10.0002f, 105.0002f, "2025-12-29", 3.0f, addrId);
+        // chk1 and chk2 not used directly, but ensure inserts succeed
 
         // Sanity-check: ensure the checkins were recorded and are visible to subsequent verification queries
         Long chkCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM checkin_address WHERE customer_address_id = ?", Long.class, addrId);
@@ -262,8 +266,10 @@ public class MapApiIntegrationTest {
         com.fasterxml.jackson.databind.JsonNode directPred = mapService.predictAddressLocation("C1", addrId.toString());
         System.out.println("DIAG_PRED_DIRECT: " + (directPred == null ? "null" : directPred.toString()));
         assertThat(directPred).as("service predict returned null for addrId=%s", addrId).isNotNull();
+        java.util.Objects.requireNonNull(directPred, "directPred should not be null");
         assertThat(directPred.has("properties")).as("service predict missing properties for addrId=%s", addrId).isTrue();
         com.fasterxml.jackson.databind.JsonNode directProps = directPred.get("properties");
+        java.util.Objects.requireNonNull(directProps, "directProps should not be null");
         System.out.println("DIAG_PRED_DIRECT_PROPS: " + (directProps == null ? "null" : directProps.toString()));
         // Ensure service-level prediction marks verified
         assertThat(directProps.has("verified")).as("service props did not have 'verified' for addrId=%s: %s", addrId, directProps).isTrue();

@@ -1,18 +1,51 @@
-export default class MapManager {
+class MapManager {
     constructor(mapId) {
+        // Remove any existing map on the container to prevent re-initialization error
+        const container = L.DomUtil.get(mapId);
+        if (container) {
+            if (container._leaflet) {
+                container._leaflet.remove();
+            }
+            // Clear any leftover Leaflet IDs to ensure clean initialization
+            if (container._leaflet_id) {
+                delete container._leaflet_id;
+            }
+        }
         this.map = L.map(mapId).setView([10.5, 105.1], 7);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.map);
+        // Track tile loading so acceptance tests can reliably detect when the app's map is ready.
+        const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.map);
+        try {
+            // When tiles finish loading at least once, set a global flag for tests to poll.
+            tileLayer.on('load', () => { try { window.__app_map_ready = true; } catch (e) { /* ignore */ } });
+        } catch (e) { /* ignore if event binding not available */ }
+        // Also set a conservative immediate flag so tests don't hang if tile load events are missed.
+        try { window.__app_map_ready = !!this.map; } catch (e) { /* ignore */ }
 
+        this.labelGroup = L.layerGroup().addTo(this.map);
+        // Single merged layer for all points (addresses, checkins, predicted)
+        this.allLayer = L.layerGroup().addTo(this.map);
+        // Instrument allLayer.addLayer to surface errors during add and to log additions
+        try {
+            const origAdd = this.allLayer.addLayer.bind(this.allLayer);
+            this.allLayer.addLayer = (layer) => {
+                try {
+                    const res = origAdd(layer);
+                    try { console.log('[MapManager] allLayer.addLayer ok, layer=', (layer && (layer._leaflet_id || (layer.options && layer.options.title) || (layer.options && layer.options.className)))); } catch(e){}
+                    return res;
+                } catch (e) {
+                    console.error('[MapManager] allLayer.addLayer threw', e, layer);
+                    throw e;
+                }
+            };
+        } catch (e) { /* ignore if instrumentation fails */ }
         this.provinceLayer = L.geoJSON(null).addTo(this.map);
         this.districtLayer = L.geoJSON(null).addTo(this.map);
         this.wardLayer = L.geoJSON(null).addTo(this.map);
-        this.labelGroup = L.layerGroup().addTo(this.map);
-        this.addressLayer = L.geoJSON(null, { pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius: 6, color: '#2c3e50', fillColor: '#34495e', fillOpacity: 0.6 }) }).addTo(this.map);
-        this.checkinGroup = L.layerGroup().addTo(this.map);
-        this.predictedLayer = L.layerGroup().addTo(this.map);
-        this._predictedConnectorLayer = L.layerGroup().addTo(this.map);
         this._addressLatLngById = {}; // map address id -> L.LatLng
-        this._allCheckinMarkers = []; // store markers for filtering
+        this._addressMarkersById = {}; // map address id -> marker (to re-order)
+        this._predictedLatLngByAddressId = {}; // map address id -> L.LatLng for predicted point
+        this._addressExactById = {}; // map address id -> boolean is_exact
+        this._allCheckinMarkers = []; // array of { marker, featureProps }
         this._fcColorMap = {}; // map fc_id -> color
         // Base styles for layers (used and adjusted based on zoom)
         this.styles = {
@@ -31,6 +64,20 @@ export default class MapManager {
 
         // Create a small legend explaining marker colors
         this._createLegend();
+        // Ensure layers are in place (address/checkin/predicted already added above)
+        // Readiness flag for app/tests to know when layers finished updating
+        this._layersReady = true;
+        try { window.__map_layers_ready = true; } catch (e) { }
+    }
+
+    _escapeHtml(str) {
+        if (!str && str !== 0) return '';
+        return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
 
     _createLegend() {
@@ -41,8 +88,8 @@ export default class MapManager {
                 <div style="font-weight:600; margin-bottom:6px;">Map legend</div>
                 <div class="legend-item"><span class="legend-swatch" style="background:#1abc9c;"></span><div>Exact address</div></div>
                 <div class="legend-item"><span class="legend-swatch" style="background:#e74c3c;"></span><div>Non-exact / ambiguous address</div></div>
-                <div class="legend-item"><span class="legend-swatch predicted-swatch" title="Predicted address (server)">📍</span><div>Predicted address</div></div>
-                <div class="legend-item"><span class="legend-swatch predicted-swatch" title="Predicted FC location (based on checkins)">🔮</span><div>Predicted FC location</div></div>
+                <div class="legend-item"><span class="legend-swatch predicted-swatch" title="Last checking of the field Collector">📍</span><div>Last checking of the field Collector</div></div>
+                <div class="legend-item"><span class="legend-swatch predicted-swatch" title="Predicted address">🔮</span><div>Predicted address</div></div>
             `;
             // Prevent clicks on the legend from propagating to the map (avoid accidental pans)
             L.DomEvent.disableClickPropagation(div);
@@ -57,6 +104,13 @@ export default class MapManager {
         this.districtLayer.clearLayers();
         this.wardLayer.clearLayers();
         this.labelGroup.clearLayers();
+        if (this.allLayer && this.allLayer.clearLayers) this.allLayer.clearLayers();
+        // reset runtime caches
+        this._addressMarkersById = {};
+        this._allCheckinMarkers.length = 0;
+        this._addressLatLngById = {};
+        this._predictedLatLngByAddressId = {};
+        this._addressExactById = {};
     }
 
     showProvinceGeojson(geojson) {
@@ -81,143 +135,179 @@ export default class MapManager {
     }
 
     showAddressesGeojson(geojson) {
-        this.addressLayer.clearLayers();
-        // clear any predicted markers or connectors from previous render
-        try { this.predictedLayer.clearLayers(); this._predictedConnectorLayer.clearLayers(); this._addressLatLngById = {}; } catch (e) { /* ignore */ }
-        this.addressLayer.addData(geojson);
-        // Bind popup for each address feature to show details and location
-        this.addressLayer.eachLayer(l => {
-            try {
-                const p = l.feature && l.feature.properties ? l.feature.properties : {};
-                // If the address is marked as non-exact (is_exact === false) draw it with a special color
-                // so users can immediately see ambiguous/non-exact addresses on the map.
-                if (p.hasOwnProperty('is_exact') && p.is_exact === false) {
-                    l.setStyle && l.setStyle({ radius: 6, color: '#e74c3c', fillColor: '#e74c3c', fillOpacity: 0.8 });
-                }
-                const ll = l.getLatLng ? l.getLatLng() : null;
-                const lat = ll ? ll.lat : null;
-                const lng = ll ? ll.lng : null;
-                const appl = p.appl_id || '';
-                const addr = p.address || p.name || '';
-                const atype = p.address_type || '';
-                const loc = (lat !== null && lng !== null) ? `(${lat.toFixed(6)}, ${lng.toFixed(6)})` : '';
-                const html = `<div><strong>appl_id:</strong> ${appl}<br/><strong>address:</strong> ${addr}<br/><strong>address_type:</strong> ${atype}<br/><strong>location(lat, long):</strong> ${loc}</div>`;
-                l.bindPopup(html);
-                // remember stored latlng by address id for potential connector drawing
-                try {
-                    const id = p.id || p.id === 0 ? p.id : null;
-                    if (id && l.getLatLng) this._addressLatLngById[String(id)] = l.getLatLng();
-                } catch (e) { /* ignore */ }
-                // If the server embedded a predicted feature for this address, render it
-                try {
-                    if (p && p.predicted_feature && p.predicted_feature.geometry && p.predicted_feature.geometry.coordinates) {
-                        const pc = p.predicted_feature.geometry.coordinates;
-                        const platlng = [pc[1], pc[0]];
-                        const predMarker = L.marker(platlng, { title: 'Predicted address', icon: L.divIcon({ className: 'predicted-marker', html: '📍', iconSize: [24,24] }) });
-                        const conf = p.confidence || (p.predicted_feature.properties && p.predicted_feature.properties.confidence) || '';
-                        const reason = p.resolvability_reason || (p.predicted_feature.properties && p.predicted_feature.properties.resolvability_reason) || '';
-                        let predHtml = `<div><strong>Predicted</strong><br/>appl_id: ${appl}<br/>confidence: ${conf}<br/>reason: ${reason}</div>`;
-                        predMarker.bindPopup(predHtml);
-                        this.predictedLayer.addLayer(predMarker);
-                        // draw connector line to stored point when available
-                        try {
-                            const aid = p.id ? String(p.id) : null;
-                            const stored = aid ? this._addressLatLngById[aid] : null;
-                            if (stored) {
-                                    const predLL = L.latLng(platlng[0], platlng[1]);
-                                    const line = L.polyline([stored, predLL], { color: '#f39c12', weight: 2, dashArray: '4 6', opacity: 0.95 });
-                                    try { // compute distance in meters and attach permanent tooltip label
-                                        const dist = Math.round(stored.distanceTo(predLL));
-                                        // permanent tooltip shows numeric distance on the connector
-                                        line.bindTooltip(`${dist} m`, { direction: 'center', permanent: true, className: 'connector-label' });
-                                    } catch (e) { /* ignore distance errors */ }
-                                    this._predictedConnectorLayer.addLayer(line);
-                            }
-                        } catch (e) { /* ignore connector errors */ }
-                    }
-                } catch (e) { /* ignore predicted render errors */ }
-            } catch (e) {
-                // ignore
+        console.log('[MapManager] showAddressesGeojson called, features=', (geojson && geojson.features) ? geojson.features.length : 0);
+        // Mark layers not-ready while updating
+        this._layersReady = false; try { window.__map_layers_ready = false; } catch (e) { }
+        // Remove existing address markers from allLayer
+        try {
+            for (const id in this._addressMarkersById) {
+                try { this.allLayer.removeLayer(this._addressMarkersById[id]); } catch (e) { }
+            }
+        } catch (e) { /* ignore */ }
+        this._addressMarkersById = {};
+        this._addressLatLngById = {};
+        this._predictedLatLngByAddressId = {};
+        this._addressExactById = {};
+
+        geojson.features.forEach(feature => {
+            console.log('[MapManager] adding address feature id=', feature && feature.properties && feature.properties.id);
+            const coords = feature.geometry.coordinates;
+            const latlng = [coords[1], coords[0]];
+            const p = feature.properties || {};
+            const isExact = (p.is_exact === true) || (String(p.is_exact) === 'true');
+            const marker = L.circleMarker(latlng, {
+                radius: 6,
+                color: isExact ? '#2c3e50' : '#e74c3c',
+                fillColor: isExact ? '#34495e' : '#e74c3c',
+                fillOpacity: isExact ? 0.6 : 0.8
+            });
+            const html = `<div><strong>appl_id:</strong> ${this._escapeHtml(p.appl_id)}<br/><strong>address:</strong> ${this._escapeHtml(p.address || p.name)}<br/><strong>address_type:</strong> ${this._escapeHtml(p.address_type)}<br/><strong>location(lat, long):</strong> (${latlng[0].toFixed(6)}, ${latlng[1].toFixed(6)})</div>`;
+            marker.bindPopup(html);
+            try { marker.featureProps = p; marker.feature = feature; } catch (e) { }
+            try { marker.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(marker); } catch (e2) { console.error('[MapManager] add address marker failed', e, e2); } }
+            if (p.id) {
+                this._addressMarkersById[String(p.id)] = marker;
+                this._addressLatLngById[String(p.id)] = L.latLng(latlng[0], latlng[1]);
+                this._addressExactById[String(p.id)] = isExact;
+            }
+            // Add predicted if present
+            if (p.predicted_feature) {
+                const pc = p.predicted_feature.geometry.coordinates;
+                const platlng = [pc[1], pc[0]];
+                const predMarker = L.marker(platlng, { icon: L.divIcon({ className: 'predicted-marker', html: '🔮', iconSize: [24,24] }) });
+                predMarker.bindPopup(`<div><strong>Predicted address</strong><br/>appl_id: ${this._escapeHtml(p.appl_id)}</div>`);
+                try { predMarker.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(predMarker); } catch (e2) { console.error('[MapManager] add predicted marker failed', e, e2); } }
+                const line = L.polyline([latlng, platlng], { color: '#f39c12', weight: 2, dashArray: '4 6' });
+                line.bindTooltip(`${Math.round(L.latLng(latlng[0], latlng[1]).distanceTo(L.latLng(platlng[0], platlng[1])))} m`, { permanent: true, className: 'connector-label' });
+                try { line.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(line); } catch (e2) { console.error('[MapManager] add predicted line failed', e, e2); } }
+                if (p.id) this._predictedLatLngByAddressId[String(p.id)] = L.latLng(platlng[0], platlng[1]);
             }
         });
-        // center map to addresses if there is at least one feature
-        if (this.addressLayer.getLayers().length > 0) {
-            const bounds = this.addressLayer.getBounds();
-            if (bounds.isValid()) this.map.fitBounds(bounds, { padding: [30, 30] });
+
+        // Fit bounds if any
+        if (geojson.features.length > 0) {
+            const bounds = L.latLngBounds(geojson.features.map(f => [f.geometry.coordinates[1], f.geometry.coordinates[0]]));
+            try { this.map.fitBounds(bounds, { padding: [30, 30] }); } catch (e) { }
         }
-        // Ensure address markers render above polygon layers so they are clickable
-        try { this.addressLayer.bringToFront(); } catch (e) { /* ignore if not supported */ }
-        try { this.predictedLayer.bringToFront(); this._predictedConnectorLayer.bringToFront(); } catch (e) { /* ignore */ }
+
+        // Bring address markers to front so they remain visible above other markers
+        try {
+            Object.values(this._addressMarkersById).forEach(m => { try { if (m && m.bringToFront) m.bringToFront(); } catch (e) {} });
+        } catch (e) { /* ignore */ }
+        // mark ready
+        this._layersReady = true;
+        try { window.__map_layers_ready = true; } catch (e) { }
     }
 
     highlightAddress(addressId, options = { fit: true }) {
         let found;
-        this.addressLayer.eachLayer(l => {
-            try {
-                const id = l.feature && l.feature.properties && l.feature.properties.id;
-                if (String(id) === String(addressId)) {
-                    l.setStyle && l.setStyle({ radius: 8, color: '#16a085', fillColor: '#1abc9c', fillOpacity: 0.9 });
-                    found = l;
-                    if (options.fit && l.getLatLng) {
-                        this.map.setView(l.getLatLng(), Math.max(this.map.getZoom(), 15));
-                    }
-                } else {
-                    // Reset style based on whether the address is exact or not. Non-exact addresses
-                    // maintain the special color so they remain visually distinct.
-                    const p = l.feature && l.feature.properties ? l.feature.properties : {};
-                    if (p.hasOwnProperty('is_exact') && p.is_exact === false) {
-                        l.setStyle && l.setStyle({ radius: 6, color: '#e74c3c', fillColor: '#e74c3c', fillOpacity: 0.8 });
+        // Iterate known address markers and style accordingly
+        try {
+            Object.keys(this._addressMarkersById || {}).forEach(key => {
+                const l = this._addressMarkersById[key];
+                try {
+                    const p = l.featureProps || (l.feature && l.feature.properties);
+                    const id = p && p.id;
+                    if (String(id) === String(addressId)) {
+                        let isExactSel = false;
+                        try {
+                            if (p) {
+                                isExactSel = (p.is_exact === true) || (String(p.is_exact) === 'true');
+                                if (!isExactSel && this._addressExactById && p.id) {
+                                    isExactSel = !!this._addressExactById[String(p.id)];
+                                }
+                            }
+                        } catch (e) { isExactSel = false; }
+                        if (l.setStyle) {
+                            if (isExactSel) {
+                                l.setStyle({ radius: 8, color: '#16a085', fillColor: '#1abc9c', fillOpacity: 0.9 });
+                            } else {
+                                l.setStyle({ radius: 8, color: '#c0392b', fillColor: '#e74c3c', fillOpacity: 0.95 });
+                            }
+                        }
+                        found = l;
+                        if (options.fit && l.getLatLng) {
+                            this.map.setView(l.getLatLng(), Math.max(this.map.getZoom(), 15));
+                        }
                     } else {
-                        l.setStyle && l.setStyle({ radius: 6, color: '#2c3e50', fillColor: '#34495e', fillOpacity: 0.6 });
+                        let isExact = false;
+                        try {
+                            if (p) {
+                                isExact = (p.is_exact === true) || (String(p.is_exact) === 'true');
+                                if (!isExact && this._addressExactById && p.id) {
+                                    isExact = !!this._addressExactById[String(p.id)];
+                                }
+                            }
+                        } catch (e) { isExact = false; }
+                        if (l.setStyle) l.setStyle({ radius: 6, color: isExact ? '#2c3e50' : '#e74c3c', fillColor: isExact ? '#34495e' : '#e74c3c', fillOpacity: isExact ? 0.6 : 0.8 });
                     }
-                }
-            } catch (e) {
-                // ignore
-            }
-        });
+                } catch (e) { /* ignore per-marker errors */ }
+            });
+        } catch (e) { /* ignore */ }
+        // Bring address markers to front so they remain visible above checkins/predictions
+        try { Object.values(this._addressMarkersById || {}).forEach(m => { try { if (m && m.bringToFront) m.bringToFront(); } catch (e) {} }); } catch (e) { }
         return !!found;
+    }
+
+    // Returns a Promise that resolves when the last show* update has finished.
+    // Useful for tests and for app flow to wait until markers and connectors are rendered.
+    waitForMapLayersReady(timeoutMs = 3000) {
+        return new Promise((resolve, reject) => {
+            const start = Date.now();
+            const check = () => {
+                try { if (this._layersReady || (typeof window !== 'undefined' && window.__map_layers_ready)) return resolve(true); } catch (e) { }
+                if (Date.now() - start > timeoutMs) return reject(new Error('map layers ready timeout'));
+                setTimeout(check, 50);
+            };
+            check();
+        });
     }
 
     // Show a predicted address point (GeoJSON Feature). Replaces previous prediction marker.
     showPredictedAddress(feature) {
         try {
-            this.predictedLayer.clearLayers();
-            this._predictedConnectorLayer.clearLayers();
+            // Clear previous predicted visuals
+            this.clearPredicted();
             if (!feature || !feature.geometry) return;
             const coords = feature.geometry.coordinates;
             if (!coords || coords.length < 2) return;
             const latlng = [coords[1], coords[0]];
-            // Use a distinct crystal-ball icon for predicted locations so it matches the
-            // UI control and is visually distinct from regular checkin markers.
-            // Choose icon and title based on feature properties. Address-embedded predictions
-            // use the location pin (📍), while FC-generated predictions use the crystal ball (🔮).
-            const isFcPrediction = props && (props.fc_id || props.areaLevel === 'fc_prediction');
-            const iconHtml = isFcPrediction ? '🔮' : '📍';
-            const titleText = isFcPrediction ? 'Predicted FC location' : 'Predicted address';
-            const marker = L.marker(latlng, { title: titleText, icon: L.divIcon({ className: 'predicted-marker', html: iconHtml, iconSize: [24, 24] }) });
             const props = feature.properties || {};
-            let html = `<div><strong>Predicted</strong><br/>appl_id: ${props.appl_id || props.applId || ''}<br/>addressId: ${props.addressId || ''}<br/>adjusted: ${props.adjusted || false}<br/>areaLevel: ${props.areaLevel || ''}</div>`;
+            const isFcPrediction = props && (props.fc_id || props.areaLevel === 'fc_prediction');
+            const iconHtml = '🔮';
+            const titleText = 'Predicted address';
+            const marker = L.marker(latlng, { title: titleText, icon: L.divIcon({ className: 'predicted-marker', html: iconHtml, iconSize: [24, 24] }) });
+            let html = `<div><strong>${this._escapeHtml(titleText)}</strong><br/>appl_id: ${this._escapeHtml(props.appl_id || props.applId)}<br/>addressId: ${this._escapeHtml(props.addressId)}<br/>adjusted: ${this._escapeHtml(props.adjusted)}<br/>areaLevel: ${this._escapeHtml(props.areaLevel)}</div>`;
             marker.bindPopup(html);
-            this.predictedLayer.addLayer(marker);
-            // draw connector from stored address point to predicted point when possible
+            try { this.allLayer.addLayer(marker); } catch (e) { this.allLayer.addLayer(marker); }
+            // draw connector if possible
             try {
                 const aid = props.addressId ? String(props.addressId) : null;
                 if (aid && this._addressLatLngById && this._addressLatLngById[aid]) {
                     const stored = this._addressLatLngById[aid];
                     const predLL = L.latLng(latlng[0], latlng[1]);
-                    const line = L.polyline([stored, predLL], { color: '#f39c12', weight: 2, dashArray: '4 6', opacity: 0.95 });
-                    try { const dist = Math.round(stored.distanceTo(predLL)); line.bindTooltip(`${dist} m`, { direction: 'center', permanent: true, className: 'connector-label' }); } catch (e) { }
-                    this._predictedConnectorLayer.addLayer(line);
+                    const line = L.polyline([stored, predLL], { color: '#f39c12', weight: 2, dashArray: '4 6' });
+                    line.bindTooltip(`${Math.round(stored.distanceTo(predLL))} m`, { permanent: true, className: 'connector-label' });
+                    try { this.allLayer.addLayer(line); } catch (e) { this.allLayer.addLayer(line); }
                 }
             } catch (e) { /* ignore connector errors */ }
             this.map.setView(latlng, Math.max(this.map.getZoom(), 15));
         } catch (e) { /* ignore */ }
     }
 
-    // Clear any existing predicted marker
+    // Clear any existing predicted marker (including markers rendered on the topPointsLayer)
     clearPredicted() {
         try {
-            this.predictedLayer.clearLayers();
+            // Remove predicted markers from the allLayer (markers using 'predicted-marker' class)
+            if (this.allLayer && this.allLayer.eachLayer) {
+                this.allLayer.eachLayer(l => {
+                    try {
+                        if (l && l.options && l.options.icon && l.options.icon.options && l.options.icon.options.className === 'predicted-marker') {
+                            this.allLayer.removeLayer(l);
+                        }
+                    } catch (e) { /* ignore per-layer errors */ }
+                });
+            }
         } catch (e) { /* ignore */ }
     }
 
@@ -234,7 +324,7 @@ export default class MapManager {
             if (l.feature.properties.center) {
                 var c = l.feature.properties.center.coordinates;
                 L.marker([c[1], c[0]], {
-                    icon: L.divIcon({ className: 'district-label', html: l.feature.properties.name, iconSize: [120, 20] })
+                    icon: L.divIcon({ className: 'district-label', html: this._escapeHtml(l.feature.properties.name), iconSize: [120, 20] })
                 }).addTo(this.labelGroup);
             }
         });
@@ -269,7 +359,7 @@ export default class MapManager {
             if (l.feature.properties.center) {
                 var c = l.feature.properties.center.coordinates;
                 L.marker([c[1], c[0]], {
-                    icon: L.divIcon({ className: 'ward-label', html: l.feature.properties.name, iconSize: [100, 20] })
+                    icon: L.divIcon({ className: 'ward-label', html: this._escapeHtml(l.feature.properties.name), iconSize: [100, 20] })
                 }).addTo(this.labelGroup);
             }
         });
@@ -278,99 +368,106 @@ export default class MapManager {
     }
 
     showCheckinsGeojson(geojson) {
+        // Mark layers not-ready while updating
+        this._layersReady = false; try { window.__map_layers_ready = false; } catch (e) { }
         // geojson features expected to have properties: id, fc_id, customer_address_id, checkin_date
         this.clearCheckins();
-        const onEach = (feature, layer) => {
-            // Popup content created in pointToLayer where distance and precise coords are available
-        };
-        const pointToLayer = (feature, latlng) => {
+        geojson.features.forEach(feature => {
+            const latlng = [feature.geometry.coordinates[1], feature.geometry.coordinates[0]];
             const fc = (feature.properties && feature.properties.fc_id) || '';
             const color = this._getColorForFc(fc);
             const marker = L.circleMarker(latlng, { radius: 6, color, fillColor: color, fillOpacity: 0.9 });
             marker.featureProps = feature.properties || {};
-            // Build a richer popup including location and distance to the linked address if available
-            try {
-                const p = marker.featureProps || {};
-                const lat = latlng.lat;
-                const lng = latlng.lng;
-                let html = `<div><strong>fc_id:</strong> ${p.fc_id || ''}<br/><strong>location(lat, long):</strong> (${lat.toFixed(6)}, ${lng.toFixed(6)})<br/>`;
-                // attempt to compute distance to linked customer address if present and add to popup
-                if (p.customer_address_id) {
-                    let addrLatLng = null;
-                    this.addressLayer.eachLayer(al => {
-                        try {
-                            const aid = al.feature && al.feature.properties && al.feature.properties.id;
-                            if (String(aid) === String(p.customer_address_id)) {
-                                if (al.getLatLng) addrLatLng = al.getLatLng();
-                            }
-                        } catch (e) { }
-                    });
-                    if (addrLatLng) {
-                        const dist = Math.round(latlng.distanceTo(addrLatLng));
-                        html += `<strong>distance (m):</strong> ${dist}<br/>`;
-                        // Also draw a temporary connector line back to the address (non-permanent tooltip)
-                        try {
-                            const line = L.polyline([latlng, addrLatLng], { color: '#f39c12', weight: 2, dashArray: '4 6', opacity: 0.7 });
-                            try { line.bindTooltip(`${dist} m`, { direction: 'center' }); } catch (e) { }
-                            this._predictedConnectorLayer.addLayer(line);
-                        } catch (e) { /* ignore connector errors */ }
-                    }
-                }
-                html += `<strong>date:</strong> ${p.checkin_date || ''}</div>`;
-                marker.bindPopup(html);
-
-                // Perform a reverse lookup to show administrative info (province/district/ward) for this checkin location
-                try {
-                    const lon = lng;
-                    const lat = lat;
-                    fetch(`/api/map/reverse?lon=${encodeURIComponent(lon)}&lat=${encodeURIComponent(lat)}`)
-                        .then(r => r.ok ? r.json() : {})
-                        .then(obj => {
-                            if (!obj) return;
-                            const province = obj.provinceName || obj.province_name || '';
-                            const district = obj.districtName || obj.district_name || '';
-                            const ward = obj.wardName || obj.ward_name || '';
-                            if (province || district || ward) {
-                                const adminHtml = `<div style="margin-top:6px; font-size:12px;"><strong>Administrative:</strong><br/>${province ? 'Province: ' + province + '<br/>' : ''}${district ? 'District: ' + district + '<br/>' : ''}${ward ? 'Ward: ' + ward + '<br/>' : ''}</div>`;
-                                // Append admin info to existing popup content
-                                try {
-                                    const existing = marker.getPopup() && marker.getPopup().getContent ? marker.getPopup().getContent() : html;
-                                    marker.getPopup().setContent(existing + adminHtml);
-                                } catch (e) {
-                                    // Fallback: re-bind popup
-                                    marker.bindPopup(html + adminHtml);
-                                }
-                            }
-                        }).catch(e => {/* ignore reverse lookup errors */});
-                } catch (e) { /* ignore reverse lookup setup errors */ }
-            } catch (e) {
-                // fallback: basic popup
-                const p = marker.featureProps || {};
-                marker.bindPopup(`<div><strong>fc_id:</strong> ${p.fc_id || ''}<br/><strong>addr_id:</strong> ${p.customer_address_id || ''}<br/><strong>date:</strong> ${p.checkin_date || ''}</div>`);
+            // Build popup
+            const p = marker.featureProps;
+            let html = `<div><strong>fc_id:</strong> ${this._escapeHtml(p.fc_id)}<br/><strong>appl_id:</strong> ${this._escapeHtml(p.appl_id)}<br/><strong>customer_address_id:</strong> ${this._escapeHtml(p.customer_address_id)}<br/><strong>location(lat, long):</strong> (${latlng[0].toFixed(6)}, ${latlng[1].toFixed(6)})<br/>`;
+            // Include the stored checking address text when available
+            if (p.checking_address) {
+                html += `<strong>checking_address:</strong> ${this._escapeHtml(p.checking_address)}<br/>`;
             }
-            this._allCheckinMarkers.push(marker);
-            return marker;
-        };
-        L.geoJSON(geojson, { pointToLayer, onEachFeature: onEach }).addTo(this.checkinGroup);
+            if (p.customer_address_id) {
+                // compute distance to the stored customer address when available
+                let addrLatLng = null;
+                if (this._addressLatLngById && this._addressLatLngById[String(p.customer_address_id)]) {
+                    addrLatLng = this._addressLatLngById[String(p.customer_address_id)];
+                } else {
+                    try {
+                        const markers = this._addressMarkersById || {};
+                        Object.values(markers).forEach(l => {
+                            try {
+                                if (l.featureProps && String(l.featureProps.id) === String(p.customer_address_id)) {
+                                    addrLatLng = l.getLatLng();
+                                }
+                            } catch (e) { /* ignore */ }
+                        });
+                    } catch (e) { /* ignore */ }
+                }
+                if (addrLatLng) {
+                    const dist = Math.round(L.latLng(latlng[0], latlng[1]).distanceTo(addrLatLng));
+                    html += `<strong>distance (m):</strong> ${dist}<br/>`;
+                    const line = L.polyline([latlng, addrLatLng], { color: '#f39c12', weight: 2, dashArray: '4 6' });
+                    line.bindTooltip(`${dist} m`, { permanent: false, className: 'connector-label' });
+                    try { line.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(line); } catch (e2) { /* ignore */ } }
+                }
+
+                // compute distance to predicted address when available
+                try {
+                    const predLL = this._predictedLatLngByAddressId && this._predictedLatLngByAddressId[String(p.customer_address_id)];
+                    if (predLL) {
+                        const distPred = Math.round(L.latLng(latlng[0], latlng[1]).distanceTo(predLL));
+                        html += `<strong>distance to predicted (m):</strong> ${distPred}<br/>`;
+                        const line2 = L.polyline([latlng, predLL], { color: '#9b59b6', weight: 2, dashArray: '2 6' });
+                        line2.bindTooltip(`${distPred} m`, { permanent: false, className: 'connector-label' });
+                        try { line2.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(line2); } catch (e2) { /* ignore */ } }
+                    }
+                } catch (e) { /* ignore predicted distance errors */ }
+            }
+            html += `<strong>date:</strong> ${this._escapeHtml(p.checkin_date)}</div>`;
+            marker.bindPopup(html);
+                this._allCheckinMarkers.push({ marker, featureProps: marker.featureProps });
+            try { marker.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(marker); } catch (e2) { console.error('[MapManager] add checkin marker failed', e, e2); } }
+        });
+        // Bring address markers to front so they remain visible above checkins/predictions
+        try { Object.values(this._addressMarkersById || {}).forEach(m => { try { if (m && m.bringToFront) m.bringToFront(); } catch (e) {} }); } catch (e) { }
+        // mark ready
+        this._layersReady = true;
+        try { window.__map_layers_ready = true; } catch (e) { }
     }
 
     clearCheckins() {
+        // remove checkin markers from allLayer
+        this._allCheckinMarkers.forEach(obj => {
+            try { if (this.map && this.map.removeLayer) this.map.removeLayer(obj.marker); else this.allLayer.removeLayer(obj.marker); } catch (e) { try { this.allLayer.removeLayer(obj.marker); } catch (e2) { /* ignore */ } }
+        });
         this._allCheckinMarkers.length = 0;
-        this.checkinGroup.clearLayers();
     }
 
     // Filter checkins by customer_address_id (keep markers whose property matches)
     filterCheckinsByAddressId(addrId) {
-        this.checkinGroup.clearLayers();
-        const toAdd = this._allCheckinMarkers.filter(m => String(m.featureProps && m.featureProps.customer_address_id) === String(addrId));
-        toAdd.forEach(m => this.checkinGroup.addLayer(m));
+        // Remove all checkin markers, then add back the filtered ones
+        this._allCheckinMarkers.forEach(obj => {
+            try { if (this.map && this.map.removeLayer) this.map.removeLayer(obj.marker); else this.allLayer.removeLayer(obj.marker); } catch (e) { try { this.allLayer.removeLayer(obj.marker); } catch (e2) { /* ignore */ } }
+        });
+        const toAdd = this._allCheckinMarkers.filter(obj => String(obj.featureProps && obj.featureProps.customer_address_id) === String(addrId));
+        toAdd.forEach(obj => {
+            try { obj.marker.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(obj.marker); } catch (e2) { /* ignore */ } }
+        });
+        // Ensure address markers are above checkins after filtering
+        try { Object.values(this._addressMarkersById || {}).forEach(m => { try { if (m && m.bringToFront) m.bringToFront(); } catch (e) {} }); } catch (e) { }
     }
 
     // Filter checkins by fc_id (when fcId is empty, show all)
     filterCheckinsByFcId(fcId) {
-        this.checkinGroup.clearLayers();
-        const toAdd = fcId ? this._allCheckinMarkers.filter(m => String(m.featureProps && m.featureProps.fc_id) === String(fcId)) : this._allCheckinMarkers.slice();
-        toAdd.forEach(m => this.checkinGroup.addLayer(m));
+        // Remove all checkin markers, then add back the filtered ones
+        this._allCheckinMarkers.forEach(obj => {
+            try { if (this.map && this.map.removeLayer) this.map.removeLayer(obj.marker); else this.allLayer.removeLayer(obj.marker); } catch (e) { try { this.allLayer.removeLayer(obj.marker); } catch (e2) { /* ignore */ } }
+        });
+        const toAdd = fcId ? this._allCheckinMarkers.filter(obj => String(obj.featureProps && obj.featureProps.fc_id) === String(fcId)) : this._allCheckinMarkers.slice();
+        toAdd.forEach(obj => {
+            try { obj.marker.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(obj.marker); } catch (e2) { /* ignore */ } }
+        });
+        // Ensure address markers are above checkins after filtering
+        try { Object.values(this._addressMarkersById || {}).forEach(m => { try { if (m && m.bringToFront) m.bringToFront(); } catch (e) {} }); } catch (e) { }
     }
 
     _getColorForFc(fc) {

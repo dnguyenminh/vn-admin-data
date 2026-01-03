@@ -1,8 +1,13 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.5.8' // Bản ổn định cao nhất hiện tại
+    id 'org.springframework.boot' version '3.5.9' // bump to latest patch
     id 'io.spring.dependency-management' version '1.1.7'
     id "net.serenity-bdd.serenity-gradle-plugin" version "5.0.1-FINAL"
+}
+
+serenity {
+    testRoot = "features"
+    requirementsDir = "src/test/resources/features"
 }
 
 group = 'vn.admin'
@@ -61,6 +66,7 @@ dependencies {
     // 6. Tiện ích
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
+    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
 
     // Testing
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
@@ -109,6 +115,16 @@ tasks.named('test') {
     // Ensure Serenity outcome files are written to a predictable Gradle build
     // directory (so reports are reproducible and not dependent on CLI flags).
     systemProperty 'serenity.outputDirectory', "$buildDir/serenity"
+    systemProperty 'serenity.test.root', 'features'
+    systemProperty 'serenity.requirements.dir', 'src/test/resources/features'
+}
+
+tasks.withType(Copy).configureEach {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.withType(Jar).configureEach {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 // Convenience task: publish/copy generated Serenity report into Maven-style
@@ -145,6 +161,12 @@ tasks.named('test') {
 
 tasks.named('aggregate') {
     dependsOn 'publishSerenityToTarget'
+    dependsOn 'waitForSerenityOutputs'
+}
+
+// Fix Gradle 9 implicit dependency warning/error: clearReports should run before publishSerenityToTarget if both are in the graph
+tasks.named('publishSerenityToTarget') {
+    mustRunAfter 'clearReports'
 }
 
 // Ensure the Gradle aggregate report waits for Serenity output files to appear

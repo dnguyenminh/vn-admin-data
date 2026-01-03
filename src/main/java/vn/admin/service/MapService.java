@@ -13,11 +13,12 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.NullNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
+import vn.admin.config.AppProperties;
 
 @Service
 public class MapService {
     private static final Logger log = LoggerFactory.getLogger(MapService.class);
+    private static final int MAX_PAGE_SIZE = 1000;
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
@@ -29,13 +30,14 @@ public class MapService {
     // the customers table + indexes are available and fast.
     private final long customersFirstPageCacheTtlMs;
 
-    public MapService(@Value("${app.customersFirstPageCacheTtlMs:0}") long customersFirstPageCacheTtlMs) {
-        this.customersFirstPageCacheTtlMs = customersFirstPageCacheTtlMs;
+    @Autowired
+    public MapService(AppProperties appProperties) {
+        this.customersFirstPageCacheTtlMs = appProperties.getCustomersFirstPageCacheTtlMs();
     }
 
     // No-arg constructor for tests that instantiate via reflection (e.g., Mockito @InjectMocks)
     public MapService() {
-        this(0L);
+        this.customersFirstPageCacheTtlMs = 0L;
     }
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -51,13 +53,7 @@ public class MapService {
         }
     }
 
-    private String getSql() {
-        return "SELECT jsonb_build_object(" + " 'type', 'FeatureCollection',"
-                + " 'features', jsonb_agg(features.feature)" + ") " + "FROM (" + " SELECT jsonb_build_object("
-                + " 'type', 'Feature', " + " 'geometry', ST_AsGeoJSON(geom_boundary)::jsonb, "
-                + " 'properties', jsonb_build_object(" + " 'id', district_id, " + " 'name', name_vn" + " )"
-                + " ) AS feature " + " FROM vn_districts " + " WHERE province_id = ?" + ") features";
-    }
+    // (removed unused helper) previously provided SQL for districts; kept out to avoid unused-method warning
 
     public JsonNode getDistrictsGeoJsonByProvince(String provinceId) {
         String sql = "SELECT jsonb_build_object(" +
@@ -246,6 +242,7 @@ public class MapService {
 
     // Paged customers with optional query
     public Map<String, Object> getCustomerListPaged(String q, int page, int size) {
+        size = Math.min(size, MAX_PAGE_SIZE);
         /**
          * Page through distinct customers (appl_id) using OFFSET/LIMIT.
          *
@@ -341,6 +338,7 @@ public class MapService {
      *   cursor (appl_id) to use for the following page (or null if no more items).
      */
     public Map<String, Object> getCustomerListAfter(String after, String q, int size) {
+        size = Math.min(size, MAX_PAGE_SIZE);
         long start = System.currentTimeMillis();
         // Serve simple cached response for empty 'after' and empty query to reduce repeated latency
         if ((after == null || after.isEmpty()) && (q == null || q.isEmpty())) {
@@ -435,6 +433,7 @@ public class MapService {
     public List<Map<String, Object>> getAddressList(String applId) {
         String sql = "SELECT id as id, address as name, address_type FROM customer_address WHERE appl_id = ? ORDER BY id";
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, applId);
+        log.info("Addresses for applId={}, count={}", applId, rows.size());
         // annotate each row with is_exact flag using heuristic
         for (Map<String, Object> r : rows) {
             Object addrObj = r.get("name");
@@ -482,6 +481,7 @@ public class MapService {
 
     // Paged addresses for a customer with optional query
     public Map<String, Object> getAddressListPaged(String applId, String q, int page, int size) {
+        size = Math.min(size, MAX_PAGE_SIZE);
         String where = " WHERE appl_id = ?";
         java.util.ArrayList<Object> countParams = new java.util.ArrayList<>();
         countParams.add(applId);
@@ -549,144 +549,129 @@ public class MapService {
     }
 
     public JsonNode getAddressesGeoJsonByAppl(String applId, Integer page, Integer size) {
+        if (size != null) size = Math.min(size, MAX_PAGE_SIZE);
         String where = " WHERE appl_id = ? AND address_lat IS NOT NULL AND address_long IS NOT NULL";
-        Object[] countArgs = new Object[] { applId };
-        String countSql = "SELECT COUNT(*) FROM customer_address" + where;
-        long total = jdbcTemplate.queryForObject(countSql, Long.class, countArgs);
 
-        String featuresSql = "SELECT jsonb_build_object('type','FeatureCollection','features', jsonb_agg(features.feature)" +
-                (page != null && size != null ? ", 'meta', jsonb_build_object('total', ?, 'page', ?, 'size', ?)" : "") +
-                ") FROM (" +
+        // Count query (only needed for pagination meta)
+        Long total = 0L;
+        if (page != null && size != null) {
+            String countSql = "SELECT COUNT(*) FROM customer_address" + where;
+            total = jdbcTemplate.queryForObject(countSql, Long.class, applId);
+        }
+
+        String featuresInnerSql = 
                 "  SELECT jsonb_build_object('type','Feature', 'geometry', ST_AsGeoJSON(ST_SetSRID(ST_Point(address_long::double precision, address_lat::double precision), 4326))::jsonb, 'properties', jsonb_build_object('id', id, 'address', address, 'address_type', address_type)) AS feature " +
                 "  FROM customer_address" + where;
+
+        String featuresSql;
+        java.util.ArrayList<Object> args = new java.util.ArrayList<>();
         if (page != null && size != null) {
-            featuresSql += " ORDER BY id LIMIT ? OFFSET ?";
-            featuresSql += ") features";
-            try {
-                // total, page, size, applId, size, offset
-                Object[] args = new Object[] { total, page, size, applId, size, page * size };
-                String raw = jdbcTemplate.queryForObject(featuresSql, String.class, args);
-                if (raw == null) return emptyFeatureCollection();
-                // Add is_exact property to each feature's properties based on address string
-                JsonNode root = objectMapper.readTree(raw);
-                if (root != null && root.has("features") && root.get("features").isArray()) {
-                    for (JsonNode f : root.withArray("features")) {
-                        try {
-                            JsonNode props = f.get("properties");
-                                if (props != null && props.has("address")) {
-                                String a = props.get("address").asText(null);
-                                boolean syntacticExact = isExactAddress(a);
-                                String aid = props.has("id") ? props.get("id").asText(null) : null;
-                                // Final is_exact determined by DB-backed verification only (Option 3)
-                                boolean verifiedExact = dbVerifyAddressById(aid);
-                                try {
-                                    log.info("getAddressesGeoJsonByAppl: applId={}, aid={}, verifiedExact={}", applId, aid, verifiedExact);
-                                } catch (Exception ignore) { }
-                                // Extra stdout for integration test visibility
-                                try { System.out.println("DIAG_GEOJSON_VERIFY: applId=" + applId + " aid=" + aid + " verifiedExact=" + verifiedExact); } catch (Exception ignore) { }
-                                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("is_exact", verifiedExact);
-                                // ensure appl_id is present on each feature so UI tooltips show the application id
-                                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("appl_id", applId);
-                                // is_resolvable: if syntactically exact OR prediction exists via checkins
-                                boolean exact = isExactAddress(a);
-                                boolean resolvable = exact;
-                                double confidence = 0.0;
-                                String reason = "insufficient_locality";
-                                if (!resolvable) {
-                                    try {
-                                        com.fasterxml.jackson.databind.JsonNode pred = predictAddressLocation(applId, aid);
-                                        resolvable = pred != null && !pred.isNull();
-                                        if (pred != null && !pred.isNull() && pred.has("properties")) {
-                                            com.fasterxml.jackson.databind.JsonNode pp = pred.get("properties");
-                                            if (pp.has("confidence")) confidence = pp.get("confidence").asDouble(0.0);
-                                            if (pp.has("resolvability_reason")) reason = pp.get("resolvability_reason").asText("insufficient_locality");
-                                            if (pp.has("inferred_province_id")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_province_id", pp.get("inferred_province_id").asText(""));
-                                            if (pp.has("inferred_province_name")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_province_name", pp.get("inferred_province_name").asText(""));
-                                            if (pp.has("inferred_district_id")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_district_id", pp.get("inferred_district_id").asText(""));
-                                            if (pp.has("inferred_district_name")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_district_name", pp.get("inferred_district_name").asText(""));
-                                            if (pp.has("inferred_ward_id")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_ward_id", pp.get("inferred_ward_id").asText(""));
-                                            if (pp.has("inferred_ward_name")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_ward_name", pp.get("inferred_ward_name").asText(""));
-                                            if (pp.has("verified")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("verified", pp.get("verified").asBoolean(false));
-                                            // Also embed the predicted feature and geometry so clients can render predicted points without an extra request
-                                            try {
-                                                ((com.fasterxml.jackson.databind.node.ObjectNode) props).set("predicted_feature", pred);
-                                                if (pred.has("geometry")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).set("predicted_geometry", pred.get("geometry"));
-                                            } catch (Exception e) { /* ignore embedding issues */ }
-                                        }
-                                    } catch (Exception e) { /* ignore */ }
-                                }
-                                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("is_resolvable", resolvable);
-                                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("confidence", confidence);
-                                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("resolvability_reason", reason);
-                                }
-                        } catch (Exception e) { /* ignore per-feature */ }
-                    }
-                }
-                return root;
-            } catch (Exception e) {
-                 log.warn("getAddressesGeoJsonByAppl failed for applId={}", applId, e);
-                 return emptyFeatureCollection();
-            }
+            featuresSql = "SELECT jsonb_build_object('type','FeatureCollection','features', jsonb_agg(features.feature)" +
+                ", 'meta', jsonb_build_object('total', ?, 'page', ?, 'size', ?)) FROM (" +
+                featuresInnerSql + " ORDER BY id LIMIT ? OFFSET ?) features";
+            args.add(total);
+            args.add(page);
+            args.add(size);
+            args.add(applId);
+            args.add(size);
+            args.add(page * size);
         } else {
-            featuresSql += ") features";
-            try {
-                String raw = jdbcTemplate.queryForObject(featuresSql, String.class, applId);
-                if (raw == null) return emptyFeatureCollection();
-                    JsonNode root = objectMapper.readTree(raw);
-                    if (root != null && root.has("features") && root.get("features").isArray()) {
-                        for (JsonNode f : root.withArray("features")) {
-                            try {
-                                JsonNode props = f.get("properties");
-                                if (props != null && props.has("address")) {
-                                    String a = props.get("address").asText(null);
-                                            boolean syntacticExact = isExactAddress(a);
-                                            String aid = props.has("id") ? props.get("id").asText(null) : null;
-                                            // Final is_exact determined by DB-backed verification only (Option 3)
-                                            boolean verifiedExact = dbVerifyAddressById(aid);
-                                            try {
-                                                log.info("getAddressesGeoJsonByAppl: applId={}, aid={}, verifiedExact={}", applId, aid, verifiedExact);
-                                            } catch (Exception ignore) { }
-                                            try { System.out.println("DIAG_GEOJSON_VERIFY: applId=" + applId + " aid=" + aid + " verifiedExact=" + verifiedExact); } catch (Exception ignore) { }
-                                            ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("is_exact", verifiedExact);
-                                        // ensure appl_id is present on each feature so UI tooltips show the application id
-                                        ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("appl_id", applId);
-                                            boolean resolvable = syntacticExact;
-                                        double confidence = 0.0;
-                                        String reason = "insufficient_locality";
-                                        if (!resolvable) {
-                                            try {
-                                                    com.fasterxml.jackson.databind.JsonNode pred = predictAddressLocation(applId, aid);
-                                                    resolvable = pred != null && !pred.isNull();
-                                                    if (pred != null && !pred.isNull() && pred.has("properties")) {
-                                                        com.fasterxml.jackson.databind.JsonNode pp = pred.get("properties");
-                                                    if (pp.has("confidence")) confidence = pp.get("confidence").asDouble(0.0);
-                                                    if (pp.has("resolvability_reason")) reason = pp.get("resolvability_reason").asText("insufficient_locality");
-                                                    if (pp.has("inferred_province_id")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_province_id", pp.get("inferred_province_id").asText(""));
-                                                    if (pp.has("inferred_province_name")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_province_name", pp.get("inferred_province_name").asText(""));
-                                                    if (pp.has("inferred_district_id")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_district_id", pp.get("inferred_district_id").asText(""));
-                                                    if (pp.has("inferred_district_name")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_district_name", pp.get("inferred_district_name").asText(""));
-                                                    if (pp.has("inferred_ward_id")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_ward_id", pp.get("inferred_ward_id").asText(""));
-                                                    if (pp.has("inferred_ward_name")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("inferred_ward_name", pp.get("inferred_ward_name").asText(""));
-                                                    if (pp.has("verified")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("verified", pp.get("verified").asBoolean(false));
-                                                        // also embed predicted feature and geometry to the properties
-                                                        try {
-                                                            ((com.fasterxml.jackson.databind.node.ObjectNode) props).set("predicted_feature", pred);
-                                                            if (pred.has("geometry")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).set("predicted_geometry", pred.get("geometry"));
-                                                        } catch (Exception e) { /* ignore */ }
-                                                }
-                                            } catch (Exception e) { /* ignore per-feature */ }
-                                        }
-                                        ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("is_resolvable", resolvable);
-                                        ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("confidence", confidence);
-                                        ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("resolvability_reason", reason);
-                                }
-                            } catch (Exception e) { /* ignore per-feature */ }
-                        }
-                    }
-                    return root;
-            } catch (Exception e) {
-                return emptyFeatureCollection();
+            featuresSql = "SELECT jsonb_build_object('type','FeatureCollection','features', jsonb_agg(features.feature)) FROM (" +
+                featuresInnerSql + ") features";
+            args.add(applId);
+        }
+
+        try {
+            String raw = jdbcTemplate.queryForObject(featuresSql, String.class, args.toArray());
+            return processAddressFeatures(raw, applId);
+        } catch (Exception e) {
+            log.warn("getAddressesGeoJsonByAppl failed for applId={}", applId, e);
+            return emptyFeatureCollection();
+        }
+    }
+
+    private JsonNode processAddressFeatures(String rawJson, String applId) {
+        if (rawJson == null) return emptyFeatureCollection();
+        try {
+            JsonNode root = objectMapper.readTree(rawJson);
+            if (root != null && root.has("features") && root.get("features").isArray()) {
+                for (JsonNode f : root.withArray("features")) {
+                    enrichAddressFeature(f, applId);
+                }
             }
+            return root;
+        } catch (Exception e) {
+            log.warn("Error processing address features for applId={}", applId, e);
+            return emptyFeatureCollection();
+        }
+    }
+
+    private void enrichAddressFeature(JsonNode f, String applId) {
+        try {
+            JsonNode props = f.get("properties");
+            if (props != null && props.has("address")) {
+                String a = props.get("address").asText(null);
+                boolean syntacticExact = isExactAddress(a);
+                String aid = props.has("id") ? props.get("id").asText(null) : null;
+
+                boolean verifiedExact = dbVerifyAddressById(aid);
+
+                // Extra logging (preserved from original)
+                try {
+                     log.info("getAddressesGeoJsonByAppl: applId={}, aid={}, verifiedExact={}", applId, aid, verifiedExact);
+                } catch (Exception ignore) { }
+                try {
+                    System.out.println("DIAG_GEOJSON_VERIFY: applId=" + applId + " aid=" + aid + " verifiedExact=" + verifiedExact);
+                } catch (Exception ignore) { }
+
+                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("is_exact", verifiedExact);
+                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("appl_id", applId);
+
+                // An address is considered resolvable if it is syntactically exact OR DB-verified exact.
+                // Only compute a predicted location when the address is NOT resolvable by these signals.
+                boolean resolvable = verifiedExact || syntacticExact;
+                double confidence = 0.0;
+                String reason = "insufficient_locality";
+
+                if (!resolvable) {
+                    try {
+                        JsonNode pred = predictAddressLocation(applId, aid);
+                        resolvable = pred != null && !pred.isNull();
+                        if (resolvable && pred.has("properties")) {
+                            JsonNode pp = pred.get("properties");
+                            if (pp.has("confidence")) confidence = pp.get("confidence").asDouble(0.0);
+                            if (pp.has("resolvability_reason")) reason = pp.get("resolvability_reason").asText("insufficient_locality");
+
+                            copyInferredProperties(props, pp);
+
+                            // Embed predicted feature
+                             try {
+                                ((com.fasterxml.jackson.databind.node.ObjectNode) props).set("predicted_feature", pred);
+                                if (pred.has("geometry")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).set("predicted_geometry", pred.get("geometry"));
+                            } catch (Exception e) { /* ignore */ }
+                        }
+                    } catch (Exception e) { /* ignore per-feature */ }
+                }
+                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("is_resolvable", resolvable);
+                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("confidence", confidence);
+                ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("resolvability_reason", reason);
+            }
+        } catch (Exception e) { /* ignore per-feature */ }
+    }
+
+    private void copyInferredProperties(JsonNode targetProps, JsonNode sourceProps) {
+        String[] keys = {
+            "inferred_province_id", "inferred_province_name",
+            "inferred_district_id", "inferred_district_name",
+            "inferred_ward_id", "inferred_ward_name"
+        };
+        for(String k : keys) {
+            if (sourceProps.has(k)) {
+                ((com.fasterxml.jackson.databind.node.ObjectNode) targetProps).put(k, sourceProps.get(k).asText(""));
+            }
+        }
+        if (sourceProps.has("verified")) {
+             ((com.fasterxml.jackson.databind.node.ObjectNode) targetProps).put("verified", sourceProps.get("verified").asBoolean(false));
         }
     }
 
@@ -702,11 +687,8 @@ public class MapService {
             // Administrative keywords are important to detect pure-admin strings
             boolean adminTokenPresent = s.matches(".*\\b(huyện|quận|phường|xã|tỉnh|thành phố|thị xã)\\b.*");
             // Normalize and detect numeric/structural cues
-            boolean hasNumber = s.matches(".*\\d.*");
             boolean hasHousePrefix = s.matches(".*\\b(số|so)\\s*\\d+.*");
-            boolean numberWithSlash = s.matches(".*\\d+\\s*\\/\\s*\\d+.*");
-            // Street keywords: include explicit street/road markers but exclude alley-like tokens
-            boolean hasStreetKeyword = s.matches(".*\\b(đường|duong|phố|pho|khu phố|khu pho|đ|d)\\b.*");
+            // numberWithSlash detection removed (unused) — kept conceptually in comments above
             // Alley tokens (ngõ/hẻm/ngách) are ambiguous — if the pattern is like 'ngõ 12 Nguyễn Trãi'
             // treat as non-exact unless an explicit house prefix ('số') or a compound number is present.
             boolean hasAlleyNumber = s.matches(".*\\b(ngõ|ngo|hẻm|hem|ngách|ngach)\\s*\\d+.*");
@@ -725,7 +707,8 @@ public class MapService {
             //   they are ambiguous without a province (e.g., 'Quận 1' appears in multiple cities).
             boolean hasWard = s.matches(".*\\b(phường|xã)\\b.*");
             boolean hasProvince = s.matches(".*\\b(tỉnh|thành phố|thị xã|tp|tp\\.|tp)\\b.*");
-            boolean hasDistrict = s.matches(".*\\b(quận|huyện)\\b.*");
+            // district token detection retained for readability; not used directly in strict heuristic
+            // boolean hasDistrict = s.matches(".*\\b(quận|huyện)\\b.*");
 
             // Exact only when number-before-street AND province is present AND
             // ward is present AND an explicit house prefix ('số') is used.
@@ -774,65 +757,64 @@ public class MapService {
     }
 
     public JsonNode getCheckinsGeoJsonByAppl(String applId, String fcId, Integer page, Integer size) {
+        if (size != null) size = Math.min(size, MAX_PAGE_SIZE);
         // Use an aliased WHERE for feature SQL (needs 'c.' prefixes) and a plain WHERE for the count query
-        String where = " WHERE c.appl_id = ? AND c.field_lat IS NOT NULL AND c.field_long IS NOT NULL";
+        String whereFeature = " WHERE c.appl_id = ? AND c.field_lat IS NOT NULL AND c.field_long IS NOT NULL";
         String whereCount = " WHERE appl_id = ? AND field_lat IS NOT NULL AND field_long IS NOT NULL";
         java.util.ArrayList<Object> countArgs = new java.util.ArrayList<>();
         countArgs.add(applId);
         if (fcId != null && !fcId.isEmpty()) {
-            where += " AND fc_id = ?";
+            whereFeature += " AND c.fc_id = ?";
             whereCount += " AND fc_id = ?";
             countArgs.add(fcId);
         }
         String countSql = "SELECT COUNT(*) FROM checkin_address" + whereCount;
         long total = jdbcTemplate.queryForObject(countSql, Long.class, countArgs.toArray());
+        log.info("countSql: {}, countArgs: {}", countSql, countArgs);
+        log.info("Checkins count for applId={}, fcId={}: {}", applId, fcId, total);
 
         // Enrich checkin features with stored/normalized distance and administrative info
         // The SQL builds GeoJSON Features and left-joins admin tables based on point containment.
-        String featuresSql = "SELECT jsonb_build_object('type','FeatureCollection','features', jsonb_agg(features.feature)" +
-            (page != null && size != null ? ", 'meta', jsonb_build_object('total', ?, 'page', ?, 'size', ?)" : "") +
-            ") FROM (" +
+        String featuresInnerSql = 
             " SELECT jsonb_build_object('type','Feature', " +
             " 'geometry', ST_AsGeoJSON(ST_SetSRID(ST_Point(c.field_long::double precision, c.field_lat::double precision),4326))::jsonb, " +
             " 'properties', jsonb_build_object(" +
-            "    'id', c.id, 'appl_id', c.appl_id, 'fc_id', c.fc_id, 'customer_address_id', c.customer_address_id, 'checkin_date', c.checkin_date, " +
+            "    'id', c.id, 'appl_id', c.appl_id, 'fc_id', c.fc_id, 'customer_address_id', c.customer_address_id, 'checkin_date', c.checkin_date, 'checking_address', a.address, " +
             // distance: prefer persisted value, otherwise compute from linked customer address when available
-            "    'distance', COALESCE(c.distance, ROUND(ST_Distance(ST_SetSRID(ST_Point(c.field_long::double precision, c.field_lat::double precision),4326)::geography, ST_SetSRID(ST_Point(a.address_long::double precision, a.address_lat::double precision),4326)::geography)::numeric,0)::double precision), " +
+            "    'distance', COALESCE(c.distance, CASE WHEN a.id IS NOT NULL THEN ROUND(ST_Distance(ST_SetSRID(ST_Point(c.field_long::double precision, c.field_lat::double precision),4326)::geography, ST_SetSRID(ST_Point(a.address_long::double precision, a.address_lat::double precision),4326)::geography)::numeric,0) ELSE null END)::double precision, " +
             "    'provinceId', p.province_id, 'provinceName', p.name_vn, 'districtId', d.district_id, 'districtName', d.name_vn, 'wardId', w.ward_id, 'wardName', w.name_vn " +
             " ) ) AS feature FROM checkin_address c " +
             " LEFT JOIN customer_address a ON c.customer_address_id = a.id " +
             " LEFT JOIN vn_wards w ON ST_Contains(w.geom_boundary, ST_SetSRID(ST_Point(c.field_long::double precision, c.field_lat::double precision),4326)) " +
             " LEFT JOIN vn_districts d ON (w.district_id = d.district_id) " +
             " LEFT JOIN vn_provinces p ON (d.province_id = p.province_id)" +
-            where;
+            whereFeature;
 
+        String featuresSql;
+        java.util.ArrayList<Object> args = new java.util.ArrayList<>();
         if (page != null && size != null) {
-            featuresSql += " ORDER BY id LIMIT ? OFFSET ?";
-            featuresSql += ") features";
-            try {
-                java.util.ArrayList<Object> args = new java.util.ArrayList<>();
-                args.add(total);
-                args.add(page);
-                args.add(size);
-                args.addAll(countArgs);
-                args.add(size);
-                args.add(page * size);
-                String raw = jdbcTemplate.queryForObject(featuresSql, String.class, args.toArray());
-                if (raw == null) return emptyFeatureCollection();
-                return objectMapper.readTree(raw);
-            } catch (Exception e) {
-                return emptyFeatureCollection();
-            }
+            featuresSql = "SELECT jsonb_build_object('type','FeatureCollection','features', jsonb_agg(features.feature)" +
+                ", 'meta', jsonb_build_object('total', ?, 'page', ?, 'size', ?)) FROM (" +
+                featuresInnerSql + " ORDER BY c.id LIMIT ? OFFSET ?) features";
+            args.add(total);
+            args.add(page);
+            args.add(size);
+            args.addAll(countArgs);
+            args.add(size);
+            args.add(page * size);
         } else {
-            featuresSql += ") features";
-            try {
-                String raw = jdbcTemplate.queryForObject(featuresSql, String.class, countArgs.toArray());
-                if (raw == null) return emptyFeatureCollection();
-                return objectMapper.readTree(raw);
-            } catch (Exception e) {
-                 log.warn("getCheckinsGeoJsonByAppl failed for applId={}, fcId={}", applId, fcId, e);
-                 return emptyFeatureCollection();
-            }
+            featuresSql = "SELECT jsonb_build_object('type','FeatureCollection','features', jsonb_agg(features.feature)) FROM (" +
+                featuresInnerSql + ") features";
+            args.addAll(countArgs);
+        }
+
+        try {
+            String raw = jdbcTemplate.queryForObject(featuresSql, String.class, args.toArray());
+            if (raw == null) return emptyFeatureCollection();
+            return objectMapper.readTree(raw);
+        } catch (Exception e) {
+            log.warn("getCheckinsGeoJsonByAppl failed for applId={}, fcId={}. SQL: {}", applId, fcId, featuresSql, e);
+            return emptyFeatureCollection();
         }
     }
 
@@ -844,6 +826,7 @@ public class MapService {
 
     // Paged fc_id values (searchable)
     public Map<String, Object> getCheckinFcIdsPaged(String applId, String q, int page, int size) {
+        size = Math.min(size, MAX_PAGE_SIZE);
         String where = " WHERE appl_id = ? AND fc_id IS NOT NULL";
         java.util.ArrayList<Object> params = new java.util.ArrayList<>();
         params.add(applId);
@@ -919,27 +902,73 @@ public class MapService {
             String addrText = null;
             try { addrText = jdbcTemplate.queryForObject(addrSql, String.class, addressId); } catch (Exception e) { /* ignore */ }
 
+            // If the address is already exact (DB-verified via checkins or syntactically exact),
+            // per app rules we must not compute or return a predicted location.
+            try {
+                boolean verifiedExact = dbVerifyAddressById(addressId);
+                boolean syntacticExact = addrText != null && isExactAddress(addrText);
+                if (verifiedExact || syntacticExact) {
+                    log.info("predictAddressLocation: skipping prediction because address is exact (verified={} syntactic={}) for applId={}, addressId={}", verifiedExact, syntacticExact, applId, addressId);
+                    return NullNode.instance;
+                }
+            } catch (Exception ignore) { /* fall through to normal prediction on errors */ }
+
             String areaGeoJson = null;
             String areaLevel = null;
             if (addrText != null) {
+                // Hierarchical inference: Province -> District -> Ward
+                String provId = null;
                 try {
-                    String wardSql = "SELECT ST_AsGeoJSON(geom_boundary) FROM vn_wards WHERE ? ILIKE '%' || name_vn || '%' LIMIT 1";
-                    areaGeoJson = jdbcTemplate.queryForObject(wardSql, String.class, addrText);
-                    if (areaGeoJson != null) areaLevel = "ward";
-                } catch (Exception e) { areaGeoJson = null; }
-                if (areaGeoJson == null) {
+                    String sql = "SELECT province_id FROM vn_provinces WHERE ? ILIKE '%' || name_vn || '%' LIMIT 1";
+                    provId = jdbcTemplate.queryForObject(sql, String.class, addrText);
+                    if (provId != null) {
+                        String geo = jdbcTemplate.queryForObject("SELECT ST_AsGeoJSON(geom_boundary) FROM vn_provinces WHERE province_id = ?", String.class, provId);
+                        if (geo != null) { areaGeoJson = geo; areaLevel = "province"; }
+                    }
+                } catch (Exception e) { /* ignore */ }
+
+                String distId = null;
+                if (provId != null) {
                     try {
-                        String distSql = "SELECT ST_AsGeoJSON(geom_boundary) FROM vn_districts WHERE ? ILIKE '%' || name_vn || '%' LIMIT 1";
-                        areaGeoJson = jdbcTemplate.queryForObject(distSql, String.class, addrText);
-                        if (areaGeoJson != null) areaLevel = "district";
-                    } catch (Exception e) { areaGeoJson = null; }
+                        String sql = "SELECT district_id FROM vn_districts WHERE province_id = ? AND ? ILIKE '%' || name_vn || '%' LIMIT 1";
+                        distId = jdbcTemplate.queryForObject(sql, String.class, provId, addrText);
+                        if (distId != null) {
+                            String geo = jdbcTemplate.queryForObject("SELECT ST_AsGeoJSON(geom_boundary) FROM vn_districts WHERE district_id = ?", String.class, distId);
+                            if (geo != null) { areaGeoJson = geo; areaLevel = "district"; }
+                        }
+                    } catch (Exception e) { /* ignore */ }
                 }
-                if (areaGeoJson == null) {
+
+                if (distId != null) {
                     try {
-                        String provSql = "SELECT ST_AsGeoJSON(geom_boundary) FROM vn_provinces WHERE ? ILIKE '%' || name_vn || '%' LIMIT 1";
-                        areaGeoJson = jdbcTemplate.queryForObject(provSql, String.class, addrText);
-                        if (areaGeoJson != null) areaLevel = "province";
+                        String sql = "SELECT ST_AsGeoJSON(geom_boundary) FROM vn_wards WHERE district_id = ? AND ? ILIKE '%' || name_vn || '%' LIMIT 1";
+                        String geo = jdbcTemplate.queryForObject(sql, String.class, distId, addrText);
+                        if (geo != null) { areaGeoJson = geo; areaLevel = "ward"; }
+                    } catch (Exception e) { /* ignore */ }
+                }
+
+                // Fallback: if hierarchical search failed completely (no province found), try broad search
+                // but enforce strict containment check later or accept risk (current behavior was strictly naive)
+                if (areaGeoJson == null) {
+                     try {
+                        String wardSql = "SELECT ST_AsGeoJSON(geom_boundary) FROM vn_wards WHERE ? ILIKE '%' || name_vn || '%' LIMIT 1";
+                        areaGeoJson = jdbcTemplate.queryForObject(wardSql, String.class, addrText);
+                        if (areaGeoJson != null) areaLevel = "ward";
                     } catch (Exception e) { areaGeoJson = null; }
+                    if (areaGeoJson == null) {
+                        try {
+                            String distSql = "SELECT ST_AsGeoJSON(geom_boundary) FROM vn_districts WHERE ? ILIKE '%' || name_vn || '%' LIMIT 1";
+                            areaGeoJson = jdbcTemplate.queryForObject(distSql, String.class, addrText);
+                            if (areaGeoJson != null) areaLevel = "district";
+                        } catch (Exception e) { areaGeoJson = null; }
+                    }
+                    if (areaGeoJson == null) {
+                        try {
+                            String provSql = "SELECT ST_AsGeoJSON(geom_boundary) FROM vn_provinces WHERE ? ILIKE '%' || name_vn || '%' LIMIT 1";
+                            areaGeoJson = jdbcTemplate.queryForObject(provSql, String.class, addrText);
+                            if (areaGeoJson != null) areaLevel = "province";
+                        } catch (Exception e) { areaGeoJson = null; }
+                    }
                 }
             }
 
@@ -973,6 +1002,13 @@ public class MapService {
                     if (adj != null) predictedGeoJson = adj;
                     adjusted = true;
                 }
+            }
+
+            // If we were unable to compute any predicted geometry, return null node instead of passing
+            // a null string to ObjectMapper.readTree (which throws an IllegalArgumentException).
+            if (predictedGeoJson == null) {
+                log.info("predictAddressLocation: no predicted geometry for applId={}, addressId={}", applId, addressId);
+                return NullNode.instance;
             }
 
             // Build GeoJSON Feature output
@@ -1082,5 +1118,9 @@ public class MapService {
         } catch (Exception e) {
             return NullNode.instance;
         }
+    }
+
+    public JdbcTemplate getJdbcTemplate() {
+        return jdbcTemplate;
     }
 }

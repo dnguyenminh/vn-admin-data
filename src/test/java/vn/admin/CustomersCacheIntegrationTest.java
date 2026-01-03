@@ -33,6 +33,7 @@ public class CustomersCacheIntegrationTest {
 
         // Prime cache
         Map<String, Object> first = mapService.getCustomerListAfter(null, "", 50);
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> items = (List<Map<String, Object>>) first.get("items");
         assertNotNull(items);
 
@@ -41,6 +42,7 @@ public class CustomersCacheIntegrationTest {
 
         // Immediate fetch should still return cached data (not include CACHE-TEST)
         Map<String, Object> second = mapService.getCustomerListAfter(null, "", 50);
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> items2 = (List<Map<String, Object>>) second.get("items");
         boolean foundNow = items2.stream().anyMatch(m -> "CACHE-TEST".equals(m.get("id")));
         assertFalse(foundNow, "New customer should not be visible while cache is fresh");
@@ -49,6 +51,7 @@ public class CustomersCacheIntegrationTest {
         Thread.sleep(1200);
 
         Map<String, Object> third = mapService.getCustomerListAfter(null, "", 50);
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> items3 = (List<Map<String, Object>>) third.get("items");
         boolean foundAfter = items3.stream().anyMatch(m -> "CACHE-TEST".equals(m.get("id")));
         assertTrue(foundAfter, "New customer should be visible after cache expiry");

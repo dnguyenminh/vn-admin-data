@@ -4,17 +4,12 @@ import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
 import net.serenitybdd.screenplay.actors.OnStage;
-import net.serenitybdd.screenplay.actions.SelectFromOptions;
+// SelectFromOptions not required here; keep step definitions concise
 import net.serenitybdd.screenplay.ensure.Ensure;
 import vn.admin.acceptancetests.tasks.SelectFrom;
-import vn.admin.acceptancetests.tasks.NavigateTo;
 import vn.admin.acceptancetests.ui.MapPage;
 import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.WebElement;
-import org.openqa.selenium.support.ui.Select;
-
-import static net.serenitybdd.screenplay.matchers.WebElementStateMatchers.isEnabled;
-import static net.serenitybdd.screenplay.matchers.WebElementStateMatchers.containsSelectOption;
+// containsSelectOption used inline via fully-qualified reference in waits; static import removed
 
 public class AdministrativeBrowsingSteps {
 
@@ -105,6 +100,7 @@ public class AdministrativeBrowsingSteps {
         // MVP: Check console logs or simple UI state if available.
     }
 
+    @SuppressWarnings("unused")
     private boolean waitForOptionInSelect(WebDriver driver, String selectId, String optionText, int timeoutSeconds) {
         org.openqa.selenium.support.ui.WebDriverWait wait = new org.openqa.selenium.support.ui.WebDriverWait(driver, java.time.Duration.ofSeconds(timeoutSeconds));
         try {

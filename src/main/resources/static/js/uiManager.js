@@ -1,4 +1,4 @@
-export default class UIManager {
+class UIManager {
     constructor() {
         this.searchInput = document.getElementById('searchInput');
         this.resultsContainer = document.getElementById('searchResults');
@@ -52,6 +52,16 @@ export default class UIManager {
                 try { setTimeout(() => { if (window.app && window.app.map && window.app.map.map) window.app.map.map.invalidateSize(); }, 50); } catch (e) { /* ignore */ }
             }
         } catch (e) { /* ignore in environments without URL support */ }
+    }
+
+    _escapeHtml(str) {
+        if (!str && str !== 0) return '';
+        return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
 
     // Position a dropdown results element so it floats over the page (not clipped by sidebar scrolling)
@@ -140,7 +150,7 @@ export default class UIManager {
             const div = document.createElement('div');
             div.className = 'search-item';
             div.setAttribute('data-json', JSON.stringify(item));
-            div.innerHTML = `<strong>${item.name}</strong> <small>(${item.type})</small>`;
+            div.innerHTML = `<strong>${this._escapeHtml(item.name)}</strong> <small>(${this._escapeHtml(item.type)})</small>`;
             this.resultsContainer.appendChild(div);
         });
         // position floating so results are not clipped by parent overflow
@@ -419,6 +429,22 @@ export default class UIManager {
     bindShowFcPrediction(onClick) {
         if (!this.showFcPredBtn || typeof onClick !== 'function') return;
         this.showFcPredBtn.addEventListener('click', (e) => { e.preventDefault(); onClick(); });
+    }
+
+    // Enable or disable the Show Predicted button (used to reflect whether a meaningful
+    // predicted location exists — e.g., when the address is exact there is no prediction).
+    setShowFcPredEnabled(enabled) {
+        if (!this.showFcPredBtn) return;
+        try {
+            this.showFcPredBtn.disabled = !enabled;
+            if (!enabled) {
+                this.showFcPredBtn.setAttribute('aria-disabled', 'true');
+                this.showFcPredBtn.title = 'Predicted location not available';
+            } else {
+                this.showFcPredBtn.removeAttribute('aria-disabled');
+                this.showFcPredBtn.title = 'Show predicted location for selected FC';
+            }
+        } catch (e) { /* ignore UI failures */ }
     }
 
     showFcResults(list, append = false) {

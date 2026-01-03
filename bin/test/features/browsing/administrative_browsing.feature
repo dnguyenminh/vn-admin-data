@@ -4,7 +4,7 @@ Feature: Administrative Browsing via Dropdowns
   So that I can drill down from Province to District to Ward
 
 
-  Scenario Outline: Select a Province from Dropdown
+  Scenario Outline: Select a Province from Dropdown (Outline)
     Given the user is on the map page
     When the user selects "<Province>" from the province dropdown
     Then the district dropdown should be populated with districts of "<Province>"
@@ -15,7 +15,7 @@ Feature: Administrative Browsing via Dropdowns
       | Bắc Giang |          |      |
       | Hà Nội    |          |      |
 
-  Scenario: Select a Province from Dropdown
+  Scenario: Select a Province from Dropdown (Single)
     Given the user is on the map page
     When the user selects "Hà Nội" from the province dropdown
     Then the district dropdown should be populated with districts of "Hà Nội"

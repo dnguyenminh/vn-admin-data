@@ -1,14 +1,13 @@
 package vn.admin.controller;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+// Logger not needed while controller is a placeholder for admin endpoints
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @org.springframework.web.bind.annotation.RequestMapping("/api/map")
 public class AdminController {
 
-    private static final Logger logger = LoggerFactory.getLogger(AdminController.class);
+    // logger removed because controller currently has no active handlers; add when needed
 
     // private final DistrictRepository districtRepository;
 

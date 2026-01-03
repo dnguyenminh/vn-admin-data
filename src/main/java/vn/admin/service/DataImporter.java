@@ -1,7 +1,5 @@
 package vn.admin.service;
 
-import org.locationtech.jts.geom.Geometry;
-import org.locationtech.jts.io.geojson.GeoJsonReader;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -22,9 +20,12 @@ public class DataImporter {
     }
 
     public void importGadmData(String filePath, boolean dryRun) throws Exception {
-        GeoJsonReader reader = new GeoJsonReader();
-        JsonObject jsonContent = JsonParser.parseReader(new FileReader(filePath)).getAsJsonObject();
-        JsonArray features = jsonContent.getAsJsonArray("features");
+        // GeoJsonReader removed; we parse GeoJSON using Gson for import flow
+        JsonArray features;
+        try (FileReader reader = new FileReader(filePath)) {
+            JsonObject jsonContent = JsonParser.parseReader(reader).getAsJsonObject();
+            features = jsonContent.getAsJsonArray("features");
+        }
 
         Set<String> processedProvinces = new HashSet<>();
         Set<String> processedDistricts = new HashSet<>();

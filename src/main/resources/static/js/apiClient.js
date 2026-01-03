@@ -1,4 +1,4 @@
-export default class ApiClient {
+class ApiClient {
     static async search(q) {
         const res = await fetch(`/api/map/search?q=${encodeURIComponent(q)}`);
         return res.json();

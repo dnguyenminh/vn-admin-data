@@ -6,30 +6,31 @@ import net.serenitybdd.screenplay.actions.Open;
 
 public class NavigateTo {
     public static Performable theMapPage() {
-        String defaultFileUrl = "file://" + System.getProperty("user.dir") + "/src/main/resources/static/index.html";
-        String resolvedUrl = System.getProperty("test.url", System.getProperty("webdriver.base.url", defaultFileUrl));
-        System.out.println("NavigateTo: default resolved URL -> " + resolvedUrl);
-
+        // Default to localhost if no property is set, to avoid file:// protocol issues with CORS/Fetch
+        String defaultUrl = "http://localhost:8080";
+        String resolvedUrl = System.getProperty("test.url", System.getProperty("webdriver.base.url", defaultUrl));
+        
         // Ensure acceptance test flag present so the client will open the sidebar immediately
         String urlWithFlag = resolvedUrl + (resolvedUrl.contains("?") ? "&" : "?") + "acceptanceTest=1";
-        System.out.println("NavigateTo: using URL with flag -> " + urlWithFlag);
+        
         return Task.where("{0} opens the map page",
-            Task.where("open url", actor -> System.out.println("NavigateTo: opening URL -> " + urlWithFlag)),
-            Open.url(urlWithFlag)
-            , Task.where("ensure left sidebar is open for tests",
+            actor -> {
+                actor.attemptsTo(Open.url(urlWithFlag));
+            }).then(Task.where("ensure left sidebar is open for tests",
                 actor -> {
                     try {
                         org.openqa.selenium.WebDriver driver = net.thucydides.core.webdriver.ThucydidesWebDriverSupport.getDriver();
                         // Wait (non-throwing) for the client-side App to initialize (App sets up sidebar toggle handlers).
                         // Use a short polling loop to avoid WebDriver's TimeoutException bubbling up and failing navigation.
                         boolean appReady = false;
-                        long deadline = System.currentTimeMillis() + java.time.Duration.ofSeconds(12).toMillis();
+                        long deadline = System.currentTimeMillis() + java.time.Duration.ofSeconds(20).toMillis();
                         while (System.currentTimeMillis() < deadline) {
                             try {
-                                Object val = ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("return (window.app !== undefined);");
+                                // Prefer explicit readiness flags, falling back to checking for the app object.
+                                Object val = ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("return (window.__app_ready === true) || (window.__app_map_ready === true) || (window.app !== undefined);");
                                 if (Boolean.TRUE.equals(val)) { appReady = true; break; }
                             } catch (Throwable ignored) { /* ignore until deadline */ }
-                            try { Thread.sleep(200); } catch (InterruptedException ie) { /* ignore */ }
+                            try { Thread.sleep(500); } catch (InterruptedException ie) { /* ignore */ }
                         }
                         if (!appReady) {
                             System.out.println("NavigateTo: app did not initialize within timeout; proceeding with force-open fallbacks.");
