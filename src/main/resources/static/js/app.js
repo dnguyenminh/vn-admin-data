@@ -354,6 +354,10 @@ class App {
                             } catch (e) { /* ignore */ }
                         }
                     }
+                    // Recompute isExact from map cache in case showAddressesGeojson populated it
+                    try {
+                        isExact = !!(this.map._addressExactById && this.map._addressExactById[String(addrId)]);
+                    } catch (e) { /* ignore */ }
                     try { this.ui.setShowFcPredEnabled(!isExact); } catch (e) { /* ignore */ }
                 } catch (e) { /* ignore */ }
             });
