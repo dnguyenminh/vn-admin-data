@@ -408,6 +408,36 @@ class MapManager {
                     const line = L.polyline([latlng, addrLatLng], { color: '#f39c12', weight: 2, dashArray: '4 6' });
                     line.bindTooltip(`${dist} m`, { permanent: false, className: 'connector-label' });
                     try { line.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(line); } catch (e2) { /* ignore */ } }
+                } else {
+                    // If we don't yet have the customer address coords locally, asynchronously fetch addresses
+                    // for this application and update the marker popup & connector when found.
+                    try {
+                        // Use the global ApiClient if available to fetch address page data (contains address_lat/address_long)
+                        const appl = (feature.properties && feature.properties.appl_id) || (feature.properties && feature.properties.applId) || null;
+                        if (typeof ApiClient !== 'undefined' && appl) {
+                            ApiClient.getAddressesPage(appl, '', 0, 1000).then(resp => {
+                                try {
+                                    const items = (resp && resp.items) ? resp.items : (resp || []);
+                                    const item = items.find(i => String(i.id) === String(p.customer_address_id));
+                                    if (item && (item.address_lat || item.address_long)) {
+                                        const foundLatLng = L.latLng(Number(item.address_lat), Number(item.address_long));
+                                        const dist2 = Math.round(L.latLng(latlng[0], latlng[1]).distanceTo(foundLatLng));
+                                        // Append distance line to popup content
+                                        try {
+                                            const pop = marker.getPopup && marker.getPopup();
+                                            if (pop && typeof pop.setContent === 'function') {
+                                                const old = pop.getContent();
+                                                pop.setContent((old || '') + `<strong>distance (m):</strong> ${dist2}<br/>`);
+                                            }
+                                        } catch (e) { /* ignore popup update errors */ }
+                                        const line2 = L.polyline([latlng, foundLatLng], { color: '#f39c12', weight: 2, dashArray: '4 6' });
+                                        line2.bindTooltip(`${dist2} m`, { permanent: false, className: 'connector-label' });
+                                        try { line2.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(line2); } catch (e2) { /* ignore */ } }
+                                    }
+                                } catch (e) { /* ignore per-checkin async errors */ }
+                            }).catch(e => { /* ignore fetch errors */ });
+                        }
+                    } catch (e) { /* ignore */ }
                 }
 
                 // compute distance to predicted address when available
