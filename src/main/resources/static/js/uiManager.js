@@ -436,6 +436,7 @@ class UIManager {
     setShowFcPredEnabled(enabled) {
         if (!this.showFcPredBtn) return;
         try {
+            console.log('[UI] setShowFcPredEnabled', enabled, new Error().stack.split('\n').slice(1,4).join('\n'));
             this.showFcPredBtn.disabled = !enabled;
             if (!enabled) {
                 this.showFcPredBtn.setAttribute('aria-disabled', 'true');
