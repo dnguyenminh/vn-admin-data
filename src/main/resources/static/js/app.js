@@ -451,6 +451,16 @@ class App {
             this.map.filterCheckinsByFcId(fcId || '');
             return;
         }
+        // Ensure address geojson is loaded so exactness is known
+        try {
+            const appl = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+            if (appl) {
+                const addrGeo = await this.api.getAddressesGeoJson(appl, 0, this.addressesSize || 50).catch(()=>null);
+                if (addrGeo && Array.isArray(addrGeo.features)) {
+                    try { this.map.showAddressesGeojson(addrGeo); } catch(e) { /* ignore */ }
+                }
+            }
+        } catch (e) { /* ignore */ }
         // Highlight and center address
         let ok = this.map.highlightAddress(addrId, { fit: true });
         
