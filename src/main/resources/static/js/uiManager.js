@@ -436,6 +436,17 @@ class UIManager {
     setShowFcPredEnabled(enabled) {
         if (!this.showFcPredBtn) return;
         try {
+            // Prevent enabling if an address is selected and it's known to be exact
+            try {
+                const app = window.app;
+                if (app && app.selectedAddressId && app.map && app.map._addressExactById) {
+                    const aid = String(app.selectedAddressId);
+                    if (app.map._addressExactById[aid]) {
+                        enabled = false;
+                        console.log('[UI] overriding setShowFcPredEnabled -> false because selectedAddress is exact', aid);
+                    }
+                }
+            } catch (e) { /* ignore */ }
             console.log('[UI] setShowFcPredEnabled', enabled, new Error().stack.split('\n').slice(1,4).join('\n'));
             this.showFcPredBtn.disabled = !enabled;
             if (!enabled) {
