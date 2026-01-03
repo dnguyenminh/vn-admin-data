@@ -334,12 +334,22 @@ class App {
                         const appl = this.selectedCustomerId || this.ui.getSelectedCustomerId() || (ev && ev.detail && ev.detail.applId);
                         if (appl) {
                             try {
-                                const resp = await this.api.getAddressesPage(appl, '', 0, 1000);
-                                const items = (resp && resp.items) ? resp.items : (resp || []);
-                                const item = items.find(i => String(i.id) === String(addrId));
-                                if (item) {
-                                    isExact = !!(item.is_exact === true || String(item.is_exact) === 'true');
-                                    if (this.map && this.map._addressExactById) this.map._addressExactById[String(addrId)] = isExact;
+                                // Prefer fetching addresses as GeoJSON so map caches (_addressExactById, markers) are populated
+                                try {
+                                    const addrGeo = await this.api.getAddressesGeoJson(appl, 0, 1000);
+                                    if (addrGeo) {
+                                        try { this.map.showAddressesGeojson(addrGeo); } catch (e) { /* ignore */ }
+                                    }
+                                } catch (e) { /* ignore */ }
+                                // If still missing, fall back to page API
+                                if ((this.map._addressExactById && this.map._addressExactById[String(addrId)]) === undefined) {
+                                    const resp = await this.api.getAddressesPage(appl, '', 0, 1000);
+                                    const items = (resp && resp.items) ? resp.items : (resp || []);
+                                    const item = items.find(i => String(i.id) === String(addrId));
+                                    if (item) {
+                                        isExact = !!(item.is_exact === true || String(item.is_exact) === 'true');
+                                        if (this.map && this.map._addressExactById) this.map._addressExactById[String(addrId)] = isExact;
+                                    }
                                 }
                             } catch (e) { /* ignore */ }
                         }
