@@ -455,10 +455,15 @@ class App {
         try {
             const appl = this.selectedCustomerId || this.ui.getSelectedCustomerId();
             if (appl) {
-                const addrGeo = await this.api.getAddressesGeoJson(appl, 0, this.addressesSize || 50).catch(()=>null);
-                if (addrGeo && Array.isArray(addrGeo.features)) {
-                    try { this.map.showAddressesGeojson(addrGeo); } catch(e) { /* ignore */ }
-                }
+                try {
+                    console.log('[App] handleAddressChange: loading addresses GeoJSON for appl', appl);
+                    const addrGeo = await this.api.getAddressesGeoJson(appl, 0, this.addressesSize || 50).catch(()=>null);
+                    console.log('[App] handleAddressChange: addrGeo response', addrGeo && addrGeo.features ? addrGeo.features.length : null, addrGeo);
+                    if (addrGeo && Array.isArray(addrGeo.features)) {
+                        try { this.map.showAddressesGeojson(addrGeo); } catch(e) { /* ignore */ }
+                        try { console.log('[App] handleAddressChange: map._addressExactById after show', this.map._addressExactById); } catch(e) { }
+                    }
+                } catch (e) { console.warn('[App] handleAddressChange: error loading addrGeo', e); }
             }
         } catch (e) { /* ignore */ }
         // Highlight and center address
