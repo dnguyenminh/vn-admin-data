@@ -367,7 +367,7 @@ class App {
                     // Ensure we also re-highlight address marker now that we refreshed addresses
                     try { if (this.selectedAddressId) this.map.highlightAddress(this.selectedAddressId, { fit: false }); } catch (e) { /* ignore */ }
                     // Finally update the Show Predicted button according to the discovered exactness
-                    try { this.ui.setShowFcPredEnabled(!isExact); } catch (e) { /* ignore */ }
+                    try { console.log('[App] before final setShowFcPredEnabled, addrId=', addrId, 'isExact=', isExact, 'map._addressExactById=', this.map._addressExactById); this.ui.setShowFcPredEnabled(!isExact); } catch (e) { /* ignore */ }
                 } catch (e) { /* ignore */ }
             });
         } catch (e) { /* ignore */ }
@@ -486,6 +486,7 @@ class App {
         // Update Show Predicted button: disable when selected address is exact
         try {
             const isExact = !!(this.map._addressExactById && this.map._addressExactById[String(addrId)]);
+            console.log('[App] before first setShowFcPredEnabled, addrId=', addrId, 'isExact=', isExact, 'map._addressExactById=', this.map._addressExactById);
             this.ui.setShowFcPredEnabled(!isExact);
         } catch (e) { /* ignore */ }
         // Filter checkins to this address
