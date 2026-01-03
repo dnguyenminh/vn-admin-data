@@ -320,6 +320,34 @@ class App {
         // Expose a simple readiness flag for acceptance tests to poll. This becomes true
         // once the app has completed initial UI and map wiring so tests can avoid race conditions.
         try { window.__app_ready = true; window.__app = this; } catch (e) { /* ignore */ }
+
+        // Listen for checkin marker clicks to update selected address and Show Predicted button state
+        try {
+            window.addEventListener('app:checkinClicked', async (ev) => {
+                try {
+                    const addrId = ev && ev.detail && ev.detail.addressId;
+                    if (!addrId) return;
+                    this.selectedAddressId = String(addrId);
+                    // Determine exactness from cached map data; if missing, fetch addresses for this appl
+                    let isExact = !!(this.map._addressExactById && this.map._addressExactById[String(addrId)]);
+                    if ((this.map._addressExactById && this.map._addressExactById[String(addrId)]) === undefined) {
+                        const appl = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+                        if (appl) {
+                            try {
+                                const resp = await this.api.getAddressesPage(appl, '', 0, 1000);
+                                const items = (resp && resp.items) ? resp.items : (resp || []);
+                                const item = items.find(i => String(i.id) === String(addrId));
+                                if (item) {
+                                    isExact = !!(item.is_exact === true || String(item.is_exact) === 'true');
+                                    if (this.map && this.map._addressExactById) this.map._addressExactById[String(addrId)] = isExact;
+                                }
+                            } catch (e) { /* ignore */ }
+                        }
+                    }
+                    try { this.ui.setShowFcPredEnabled(!isExact); } catch (e) { /* ignore */ }
+                } catch (e) { /* ignore */ }
+            });
+        } catch (e) { /* ignore */ }
     }
 
     async loadCustomersPage(q, page) {

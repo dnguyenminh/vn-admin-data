@@ -488,7 +488,16 @@ class MapManager {
             html += `<strong>date:</strong> ${this._escapeHtml(p.checkin_date)}</div>`;
             marker.bindPopup(html);
                 this._allCheckinMarkers.push({ marker, featureProps: marker.featureProps });
-            try { marker.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(marker); } catch (e2) { console.error('[MapManager] add checkin marker failed', e, e2); } }
+            try { 
+                // Emit an application-level event when a checkin marker is clicked so the app can update UI state
+                marker.on && marker.on('click', (ev) => {
+                    try {
+                        const aid = marker.featureProps && marker.featureProps.customer_address_id;
+                        window.dispatchEvent(new CustomEvent('app:checkinClicked', { detail: { addressId: aid } }));
+                    } catch (e) { /* ignore */ }
+                });
+                marker.addTo(this.map);
+            } catch (e) { try { this.allLayer.addLayer(marker); } catch (e2) { console.error('[MapManager] add checkin marker failed', e, e2); } }
         });
         // Bring address markers to front so they remain visible above checkins/predictions
         try { Object.values(this._addressMarkersById || {}).forEach(m => { try { if (m && m.bringToFront) m.bringToFront(); } catch (e) {} }); } catch (e) { }
