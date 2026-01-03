@@ -226,7 +226,14 @@ class App {
                 this.logToPage('features length: ' + features.length);
                 console.log('features length:', features.length);
                 if (features.length > 0) {
-                    // Focus on the first checkin
+                    // Sort by checkin_date descending to find the latest
+                    features.sort((a, b) => {
+                        const da = (a.properties && a.properties.checkin_date) || '';
+                        const db = (b.properties && b.properties.checkin_date) || '';
+                        return (da < db) ? 1 : ((da > db) ? -1 : 0);
+                    });
+
+                    // Focus on the first checkin (now the latest)
                     const first = features[0];
                     const lat = first.geometry.coordinates[1];
                     const lng = first.geometry.coordinates[0];
@@ -328,36 +335,38 @@ class App {
                     const addrId = ev && ev.detail && ev.detail.addressId;
                     if (!addrId) return;
                     this.selectedAddressId = String(addrId);
-                    // Determine exactness from cached map data; if missing, fetch addresses for this appl
-                    let isExact = !!(this.map._addressExactById && this.map._addressExactById[String(addrId)]);
-                    if ((this.map._addressExactById && this.map._addressExactById[String(addrId)]) === undefined) {
-                        const appl = this.selectedCustomerId || this.ui.getSelectedCustomerId() || (ev && ev.detail && ev.detail.applId);
-                        if (appl) {
-                            try {
-                                // Prefer fetching addresses as GeoJSON so map caches (_addressExactById, markers) are populated
+
+                    // Attempt to fetch/refresh addresses so the map marker appears and we can determine is_exact.
+                    const appl = this.selectedCustomerId || this.ui.getSelectedCustomerId() || (ev && ev.detail && ev.detail.applId);
+                    let isExact = false;
+                    if (appl) {
+                        try {
+                            const addrGeo = await this.api.getAddressesGeoJson(appl, 0, 1000).catch(() => null);
+                            if (addrGeo && Array.isArray(addrGeo.features)) {
+                                try { this.map.showAddressesGeojson(addrGeo); } catch (e) { /* ignore */ }
+                                const feat = addrGeo.features.find(f => String((f.properties && f.properties.id) || '') === String(addrId));
+                                if (feat && feat.properties) {
+                                    isExact = (feat.properties.is_exact === true) || (String(feat.properties.is_exact) === 'true');
+                                    if (this.map && this.map._addressExactById) this.map._addressExactById[String(addrId)] = isExact;
+                                }
+                            }
+                            // Fallback to page API if not found in geojson
+                            if (!isExact) {
                                 try {
-                                    const addrGeo = await this.api.getAddressesGeoJson(appl, 0, 1000);
-                                    if (addrGeo) {
-                                        try { this.map.showAddressesGeojson(addrGeo); } catch (e) { /* ignore */ }
-                                    }
-                                } catch (e) { /* ignore */ }
-                                // If still missing, fall back to page API
-                                if ((this.map._addressExactById && this.map._addressExactById[String(addrId)]) === undefined) {
-                                    const resp = await this.api.getAddressesPage(appl, '', 0, 1000);
+                                    const resp = await this.api.getAddressesPage(appl, '', 0, 1000).catch(() => null);
                                     const items = (resp && resp.items) ? resp.items : (resp || []);
                                     const item = items.find(i => String(i.id) === String(addrId));
                                     if (item) {
                                         isExact = !!(item.is_exact === true || String(item.is_exact) === 'true');
                                         if (this.map && this.map._addressExactById) this.map._addressExactById[String(addrId)] = isExact;
                                     }
-                                }
-                            } catch (e) { /* ignore */ }
-                        }
+                                } catch (e) { /* ignore */ }
+                            }
+                        } catch (e) { /* ignore */ }
                     }
-                    // Recompute isExact from map cache in case showAddressesGeojson populated it
-                    try {
-                        isExact = !!(this.map._addressExactById && this.map._addressExactById[String(addrId)]);
-                    } catch (e) { /* ignore */ }
+                    // Ensure we also re-highlight address marker now that we refreshed addresses
+                    try { if (this.selectedAddressId) this.map.highlightAddress(this.selectedAddressId, { fit: false }); } catch (e) { /* ignore */ }
+                    // Finally update the Show Predicted button according to the discovered exactness
                     try { this.ui.setShowFcPredEnabled(!isExact); } catch (e) { /* ignore */ }
                 } catch (e) { /* ignore */ }
             });
@@ -443,7 +452,22 @@ class App {
             return;
         }
         // Highlight and center address
-        this.map.highlightAddress(addrId, { fit: true });
+        let ok = this.map.highlightAddress(addrId, { fit: true });
+        
+        // If address marker not found (e.g. not in the initial page of 50), load more addresses
+        if (!ok) {
+            try {
+                const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+                if (applId) {
+                    // Fetch a larger batch (e.g. 1000) to likely include the selected address
+                    const addrGeo = await this.api.getAddressesGeoJson(applId, 0, 1000);
+                    this.map.showAddressesGeojson(addrGeo);
+                    // Try highlighting again
+                    ok = this.map.highlightAddress(addrId, { fit: true });
+                }
+            } catch (e) { console.warn('Fallback load for address failed', e); }
+        }
+
         // Update Show Predicted button: disable when selected address is exact
         try {
             const isExact = !!(this.map._addressExactById && this.map._addressExactById[String(addrId)]);
@@ -526,7 +550,14 @@ class App {
             const checkins = await this.api.getCheckinsGeoJson(applId, fcId, 0, 1000);
             const cnt = (checkins && checkins.features) ? checkins.features.length : 0;
             // If only one checking location, predicted address will equal the customer address -> disable
-            const disable = cnt <= 1;
+            let disable = cnt <= 1;
+            // Also force disable if the currently selected address is Exact (Verified)
+            if (!disable && this.selectedAddressId) {
+                try {
+                    const isExact = !!(this.map._addressExactById && this.map._addressExactById[String(this.selectedAddressId)]);
+                    if (isExact) disable = true;
+                } catch (e) { /* ignore */ }
+            }
             this.ui.setShowFcPredEnabled(!disable);
         } catch (e) { /* ignore */ }
     }
