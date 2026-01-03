@@ -331,7 +331,7 @@ class App {
                     // Determine exactness from cached map data; if missing, fetch addresses for this appl
                     let isExact = !!(this.map._addressExactById && this.map._addressExactById[String(addrId)]);
                     if ((this.map._addressExactById && this.map._addressExactById[String(addrId)]) === undefined) {
-                        const appl = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+                        const appl = this.selectedCustomerId || this.ui.getSelectedCustomerId() || (ev && ev.detail && ev.detail.applId);
                         if (appl) {
                             try {
                                 const resp = await this.api.getAddressesPage(appl, '', 0, 1000);

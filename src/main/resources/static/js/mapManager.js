@@ -492,8 +492,9 @@ class MapManager {
                 // Emit an application-level event when a checkin marker is clicked so the app can update UI state
                 marker.on && marker.on('click', (ev) => {
                     try {
-                        const aid = marker.featureProps && marker.featureProps.customer_address_id;
-                        window.dispatchEvent(new CustomEvent('app:checkinClicked', { detail: { addressId: aid } }));
+                        const aid = marker.featureProps && (marker.featureProps.customer_address_id || marker.featureProps.customerAddressId);
+                        const appl = marker.featureProps && (marker.featureProps.appl_id || marker.featureProps.applId || marker.featureProps.applid);
+                        window.dispatchEvent(new CustomEvent('app:checkinClicked', { detail: { addressId: aid, applId: appl } }));
                     } catch (e) { /* ignore */ }
                 });
                 marker.addTo(this.map);
