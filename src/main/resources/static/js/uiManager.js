@@ -359,6 +359,7 @@ class UIManager {
                 ev.stopPropagation();
                 if (itemEl.dataset.loadMore === '1') { if (typeof onLoadMore === 'function') onLoadMore(); return; }
                 const id = itemEl.dataset.id; const name = itemEl.textContent.trim();
+                try { console.log('[UI] addressResults click -> id=', id, 'name=', name, 'prevSelectedId=', (this.addressCombo ? this.addressCombo.dataset.selectedId : null)); } catch (e) {}
                 this.setAddressValue(name, id); this.hideAddressResults(); if (typeof onSelect === 'function') onSelect({ id, name });
             });
         }
@@ -381,7 +382,7 @@ class UIManager {
 
     hideAddressResults() { if (this.addressResults) this.addressResults.style.display = 'none'; }
 
-    setAddressValue(name, id) { if (this.addressCombo) { this.addressCombo.value = name; this.addressCombo.dataset.selectedId = String(id); } }
+    setAddressValue(name, id) { if (this.addressCombo) { try { console.log('[UI] setAddressValue prev=', this.addressCombo.dataset.selectedId, 'new=', String(id), 'name=', name); } catch(e){} this.addressCombo.value = name; this.addressCombo.dataset.selectedId = String(id); } }
 
     getSelectedAddressId() { return this.addressCombo ? this.addressCombo.dataset.selectedId : null; }
 
@@ -433,21 +434,42 @@ class UIManager {
 
     // Enable or disable the Show Predicted button (used to reflect whether a meaningful
     // predicted location exists — e.g., when the address is exact there is no prediction).
-    setShowFcPredEnabled(enabled) {
+    setShowFcPredEnabled(enabled, version) {
         if (!this.showFcPredBtn) return;
         try {
-            // Prevent enabling if an address is selected and it's known to be exact
+            // Maintain a last-applied version to prevent stale callers overwriting newer decisions
+            this._lastShowFcPredVersion = (this._lastShowFcPredVersion || 0);
+            const v = (typeof version === 'number') ? version : 0;
+            if (v < this._lastShowFcPredVersion) {
+                console.log('[UI] ignoring setShowFcPredEnabled due to stale version', v, this._lastShowFcPredVersion);
+                return;
+            }
+            // If the incoming request is the SAME version as the last-applied one, avoid letting an enable in the same version flip a prior disable
+            try {
+                const currentEnabled = !this.showFcPredBtn.disabled;
+                if (v === this._lastShowFcPredVersion && enabled === true && currentEnabled === false) {
+                    console.log('[UI] ignoring enable request with same version to avoid flip', v, this._lastShowFcPredVersion);
+                    return;
+                }
+            } catch (e) { /* ignore */ }
+            this._lastShowFcPredVersion = Math.max(this._lastShowFcPredVersion, v);
+
+            // Prevent enabling if an address is selected (either app-selected or UI-selected) and it's known to be exact
             try {
                 const app = window.app;
-                if (app && app.selectedAddressId && app.map && app.map._addressExactById) {
-                    const aid = String(app.selectedAddressId);
-                    if (app.map._addressExactById[aid]) {
+                const appSel = (app && app.selectedAddressId) ? String(app.selectedAddressId) : null;
+                const uiSel = this.getSelectedAddressId ? this.getSelectedAddressId() : null;
+                const chosen = appSel || uiSel;
+                if (chosen && app && app.map && app.map._addressExactById) {
+                    if (app.map._addressExactById[chosen]) {
                         enabled = false;
-                        console.log('[UI] overriding setShowFcPredEnabled -> false because selectedAddress is exact', aid);
+                        console.log('[UI] overriding setShowFcPredEnabled -> false because selectedAddress is exact', chosen, { appSel, uiSel });
                     }
                 }
             } catch (e) { /* ignore */ }
-            console.log('[UI] setShowFcPredEnabled', enabled, new Error().stack.split('\n').slice(1,4).join('\n'));
+            console.log('[UI] setShowFcPredEnabled', enabled, 'ver=', v, new Error().stack.split('\n').slice(1,4).join('\n'));
+            // No-op if state unchanged to avoid redundant toggles from concurrent callers
+            try { const current = !this.showFcPredBtn.disabled; if (current === !!enabled) return; } catch (e) { /* ignore */ }
             this.showFcPredBtn.disabled = !enabled;
             if (!enabled) {
                 this.showFcPredBtn.setAttribute('aria-disabled', 'true');

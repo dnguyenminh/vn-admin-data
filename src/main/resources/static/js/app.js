@@ -6,6 +6,8 @@ class App {
 
         this._wireEvents();
         this._init();
+        // UI version token used to prevent stale async calls from overriding current UI decisions
+        this._uiChangeVersion = 0;
     }
 
     _escapeHtml(str) {
@@ -19,11 +21,8 @@ class App {
     }
 
     logToPage(msg) {
-        const div = document.getElementById('logConsole');
-        if (div) {
-            div.innerHTML += new Date().toLocaleTimeString() + ': ' + this._escapeHtml(msg) + '<br>';
-            div.scrollTop = div.scrollHeight;
-        }
+        // On-page logging panel has been removed; keep a no-op to avoid changing call-sites.
+        return;
     }
 
     _wireEvents() {
@@ -336,6 +335,10 @@ class App {
                     if (!addrId) return;
                     this.selectedAddressId = String(addrId);
 
+                    // Bump UI version: this handler's UI decisions should take precedence over any stale async flows
+                    this._uiChangeVersion = (this._uiChangeVersion || 0) + 1;
+                    console.log('[App] uiVersion ->', this._uiChangeVersion);
+
                     // Attempt to fetch/refresh addresses so the map marker appears and we can determine is_exact.
                     const appl = this.selectedCustomerId || this.ui.getSelectedCustomerId() || (ev && ev.detail && ev.detail.applId);
                     let isExact = false;
@@ -401,6 +404,10 @@ class App {
     // or if only one address exists and it's exact -> disabled.
     async updateShowFcPredEnabled() {
         try {
+            // Capture current UI version so we can abort if a newer UI-affecting action started
+            const ver = (this._uiChangeVersion || 0);
+            console.log('[App] updateShowFcPredEnabled start ver=', ver);
+
             const appl = this.selectedCustomerId || this.ui.getSelectedCustomerId();
             const addrId = this.selectedAddressId || this.ui.getSelectedAddressId();
             const fcId = this.selectedFcId || this.ui.getSelectedFcId();
@@ -408,7 +415,7 @@ class App {
             // If selected address is known exact, always disable
             try {
                 if (addrId && this.map && this.map._addressExactById && this.map._addressExactById[String(addrId)]) {
-                    this.ui.setShowFcPredEnabled(false);
+                    this.ui.setShowFcPredEnabled(false, ver);
                     return;
                 }
             } catch (e) { /* ignore */ }
@@ -417,10 +424,22 @@ class App {
             if (appl && fcId) {
                 try {
                     const checkins = await this.api.getCheckinsGeoJson(appl, fcId, 0, 1000);
+                    // Abort if a newer UI operation started while we were awaiting
+                    if (this._uiChangeVersion !== ver) { console.log('[App] updateShowFcPredEnabled abort after checkins, ver=', ver, 'now=', this._uiChangeVersion); return; }
                     const cnt = (checkins && checkins.features) ? checkins.features.length : 0;
-                    if (cnt <= 1) { this.ui.setShowFcPredEnabled(false); return; }
-                    // otherwise, enable (subject to address exactness already checked)
-                    this.ui.setShowFcPredEnabled(true);
+                    if (cnt <= 1) { this.ui.setShowFcPredEnabled(false, ver); return; }
+                    // re-check: if selected address became exact while we awaited, disable
+                    try {
+                        const currentAddrId = this.selectedAddressId || this.ui.getSelectedAddressId();
+                        if (currentAddrId && this.map && this.map._addressExactById && this.map._addressExactById[String(currentAddrId)]) {
+                            console.log('[App] updateShowFcPredEnabled abort enable because address became exact', currentAddrId);
+                            this.ui.setShowFcPredEnabled(false, ver);
+                            return;
+                        }
+                    } catch (e) { /* ignore */ }
+                    // Final version check before enabling
+                    if (this._uiChangeVersion !== ver) { console.log('[App] updateShowFcPredEnabled abort before enabling, ver=', ver, 'now=', this._uiChangeVersion); return; }
+                    this.ui.setShowFcPredEnabled(true, ver);
                     return;
                 } catch (e) { /* ignore */ }
             }
@@ -429,18 +448,41 @@ class App {
             if (appl && !addrId) {
                 try {
                     const resp = await this.api.getAddresses(appl, '', 0, this.addressesSize || 50);
+                    // Abort if a newer UI operation started while we were awaiting
+                    if (this._uiChangeVersion !== ver) { console.log('[App] updateShowFcPredEnabled abort after addresses, ver=', ver, 'now=', this._uiChangeVersion); return; }
                     const items = (resp && resp.items) ? resp.items : (resp || []);
                     if (items && items.length === 1) {
                         const only = items[0];
                         const exactOnly = !!(only && (only.is_exact === true || String(only.is_exact) === 'true'));
-                        this.ui.setShowFcPredEnabled(!exactOnly);
+                        this.ui.setShowFcPredEnabled(!exactOnly, ver);
                         return;
                     }
                 } catch (e) { /* ignore */ }
             }
 
-            // Default: enable
-            try { this.ui.setShowFcPredEnabled(true); } catch (e) { /* ignore */ }
+            // Default: enable (unless a newer UI operation has started)
+            if (this._uiChangeVersion !== ver) { console.log('[App] updateShowFcPredEnabled abort before default, ver=', ver, 'now=', this._uiChangeVersion); return; }
+            try {
+                const currentAddrId = this.selectedAddressId || this.ui.getSelectedAddressId();
+                const mapExact = !!(currentAddrId && this.map && this.map._addressExactById && this.map._addressExactById[String(currentAddrId)]);
+                console.log('[App] final enable check:', { ver, currentAddrId, mapExact, appSelected: this.selectedAddressId, uiSelected: this.ui.getSelectedAddressId(), uiVer: this._uiChangeVersion });
+                if (mapExact) {
+                    console.log('[App] updateShowFcPredEnabled abort default enable because address is exact (final check)', currentAddrId);
+                    this.ui.setShowFcPredEnabled(false, ver);
+                    return;
+                }
+                // As an extra safety, if UI has an address selected (even if app.selectedAddressId is not set), avoid enabling
+                try {
+                    const uiSel = this.ui.getSelectedAddressId();
+                    if (uiSel && this.map && this.map._addressExactById && this.map._addressExactById[String(uiSel)]) {
+                        console.log('[App] updateShowFcPredEnabled abort default enable because UI-selected address is exact', uiSel);
+                        this.ui.setShowFcPredEnabled(false, ver);
+                        return;
+                    }
+                } catch (e) { /* ignore */ }
+
+                this.ui.setShowFcPredEnabled(true, ver);
+            } catch (e) { /* ignore */ }
         } catch (e) { /* ignore */ }
     }
 
@@ -455,6 +497,9 @@ class App {
             this.map.clearPredicted();
             return;
         }
+        // Mark UI version so concurrent async flows don't override what we're about to set
+        this._uiChangeVersion = (this._uiChangeVersion || 0) + 1;
+
         // load first page of addresses and checkins for this customer
         this.addressesPage = 0;
         this.addressesQ = '';
@@ -479,27 +524,20 @@ class App {
     }
 
     async handleAddressChange(addrId) {
+        // Increment version to invalidate stale async updates from previous calls
+        const version = (this._addrChangeVersion || 0) + 1;
+        this._addrChangeVersion = version;
+        // Also mark UI version so UI updates from this handler are treated as authoritative
+        this._uiChangeVersion = (this._uiChangeVersion || 0) + 1;
+        const uiVersion = this._uiChangeVersion;
+        try { console.log('[App] handleAddressChange START addrId=', addrId, 'version=', version, 'uiVersion=', uiVersion, 'app.selectedAddressId=', this.selectedAddressId, 'uiSel=', this.ui ? this.ui.getSelectedAddressId() : null); } catch (e) {}
+
         if (!addrId) {
             // show all checkins
             const fcId = this.selectedFcId || this.ui.getSelectedFcId();
             this.map.filterCheckinsByFcId(fcId || '');
             return;
         }
-        // Ensure address geojson is loaded so exactness is known
-        try {
-            const appl = this.selectedCustomerId || this.ui.getSelectedCustomerId();
-            if (appl) {
-                try {
-                    console.log('[App] handleAddressChange: loading addresses GeoJSON for appl', appl);
-                    const addrGeo = await this.api.getAddressesGeoJson(appl, 0, this.addressesSize || 50).catch(()=>null);
-                    console.log('[App] handleAddressChange: addrGeo response', addrGeo && addrGeo.features ? addrGeo.features.length : null, addrGeo);
-                    if (addrGeo && Array.isArray(addrGeo.features)) {
-                        try { this.map.showAddressesGeojson(addrGeo); } catch(e) { /* ignore */ }
-                        try { console.log('[App] handleAddressChange: map._addressExactById after show', this.map._addressExactById); } catch(e) { }
-                    }
-                } catch (e) { console.warn('[App] handleAddressChange: error loading addrGeo', e); }
-            }
-        } catch (e) { /* ignore */ }
         // Highlight and center address
         let ok = this.map.highlightAddress(addrId, { fit: true });
         
@@ -510,6 +548,10 @@ class App {
                 if (applId) {
                     // Fetch a larger batch (e.g. 1000) to likely include the selected address
                     const addrGeo = await this.api.getAddressesGeoJson(applId, 0, 1000);
+                    
+                    // Check version before applying UI updates
+                    if (this._addrChangeVersion !== version) return;
+
                     this.map.showAddressesGeojson(addrGeo);
                     // Try highlighting again
                     ok = this.map.highlightAddress(addrId, { fit: true });
@@ -517,9 +559,14 @@ class App {
             } catch (e) { console.warn('Fallback load for address failed', e); }
         }
 
-        // Update Show Predicted button: use centralized logic
+        // Check version again before final UI updates
+        if (this._addrChangeVersion !== version) return;
+
+        // Update Show Predicted button: disable when selected address is exact
         try {
-            await this.updateShowFcPredEnabled();
+            const isExact = !!(this.map._addressExactById && this.map._addressExactById[String(addrId)]);
+            try { console.log('[App] handleAddressChange decision addrId=', addrId, 'isExact=', isExact, 'uiVersion=', uiVersion, 'map._addressExactById=', this.map._addressExactById); } catch (e) {}
+            this.ui.setShowFcPredEnabled(!isExact, uiVersion);
         } catch (e) { /* ignore */ }
         // Filter checkins to this address
         this.map.filterCheckinsByAddressId(addrId);
@@ -587,8 +634,49 @@ class App {
     async handleFcChange(fcId) {
         // filter checkins by fc
         this.map.filterCheckinsByFcId(fcId);
-        // Recompute Show Predicted enabled state since fc changed
-        try { await this.updateShowFcPredEnabled(); } catch (e) { /* ignore */ }
+        
+        // Disable/enable the Show Predicted button when there's insufficient variation in checkins
+        // Use a version token to prevent race conditions from async checkins fetch
+        const version = (this._fcChangeVersion || 0) + 1;
+        this._fcChangeVersion = version;
+        // Mark UI version so the result of this flow is not overridden by other async flows
+        this._uiChangeVersion = (this._uiChangeVersion || 0) + 1;
+        const uiVersion = this._uiChangeVersion;
+        try {
+            const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+            if (!applId || !fcId) return;
+            try { console.log('[App] handleFcChange START fcId=', fcId, 'version=', version, 'uiVersion=', uiVersion, 'selectedAddressId=', this.selectedAddressId, 'uiSel=', this.ui ? this.ui.getSelectedAddressId() : null); } catch(e){}
+            const checkins = await this.api.getCheckinsGeoJson(applId, fcId, 0, 1000);
+            try { console.log('[App] handleFcChange checkinsCount=', (checkins && checkins.features) ? checkins.features.length : 0); } catch(e){}
+            // Check if a newer call has started
+            if (this._fcChangeVersion !== version) return;
+            // Abort if the overall UI version changed while we were awaiting
+            if (this._uiChangeVersion !== uiVersion) { console.log('[App] handleFcChange abort due to uiVersion change, uiVersion=', uiVersion, 'now=', this._uiChangeVersion); return; }
+
+            const cnt = (checkins && checkins.features) ? checkins.features.length : 0;
+            // If only one checking location, predicted address will equal the customer address -> disable
+            let disable = cnt <= 1;
+            // Also force disable if the currently selected address is Exact (Verified)
+            try {
+                const currentAddrId = this.selectedAddressId || this.ui.getSelectedAddressId();
+                const isExact = !!(currentAddrId && this.map._addressExactById && this.map._addressExactById[String(currentAddrId)]);
+                try { console.log('[App] handleFcChange address check currentAddrId=', currentAddrId, 'isExact=', isExact, 'map._addressExactById=', this.map._addressExactById); } catch(e){}
+                if (isExact) disable = true;
+            } catch (e) { /* ignore */ }
+
+            // Final defensive re-check right before applying UI change: prefer UI-selected address and enforce exactness disables
+            try {
+                const finalAddr = this.ui.getSelectedAddressId() || this.selectedAddressId;
+                const finalIsExact = !!(finalAddr && this.map._addressExactById && this.map._addressExactById[String(finalAddr)]);
+                if (finalIsExact) {
+                    try { console.log('[App] handleFcChange final check: address is exact -> forcing disable, finalAddr=', finalAddr); } catch(e){}
+                    this.ui.setShowFcPredEnabled(false, uiVersion);
+                    return;
+                }
+            } catch (e) { /* ignore */ }
+
+            this.ui.setShowFcPredEnabled(!disable, uiVersion);
+        } catch (e) { /* ignore */ }
     }
 
     async handleProvinceChange(pid) {

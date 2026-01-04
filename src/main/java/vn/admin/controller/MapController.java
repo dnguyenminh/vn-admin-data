@@ -140,6 +140,19 @@ public class MapController {
         }
     }
 
+    // Developer-only diagnostic: returns checkin counts per address and whether the new rule would mark them verified.
+    // Accessible only when explicitly requested (e.g., use ?acceptanceTest=1 in dev environments).
+    @GetMapping(value = "/debug/address-verification")
+    public ResponseEntity<java.util.List<java.util.Map<String, Object>>> getAddressVerification(@RequestParam("applId") String applId,
+                                                                                                 @RequestParam(value = "acceptanceTest", required = false) String acceptanceTest) {
+        // Guard: only allow when acceptanceTest flag is present to avoid accidental exposure in production
+        if (acceptanceTest == null || acceptanceTest.isEmpty()) {
+            return ResponseEntity.badRequest().body(java.util.Collections.singletonList(java.util.Collections.singletonMap("error", "acceptanceTest flag required")));
+        }
+        java.util.List<java.util.Map<String, Object>> resp = mapService.getAddressVerification(applId);
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(resp);
+    }
+
     @GetMapping(value = "/checkins/geojson")
         public ResponseEntity<JsonNode> getCheckinsGeoJson(@RequestParam("applId") String applId,
             @RequestParam(value = "fcId", required = false) String fcId,

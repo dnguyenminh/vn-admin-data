@@ -6,7 +6,7 @@ Feature: Address Reverse Lookup
   Scenario: Selecting an address populates province, district and ward
     Given the user is on the map page
     And the map is ready for interaction
-    When the user selects an address result "Fake Address" with ID "ADDR-1"
-    Then the province select should be "P-1"
-    And the district select should be "D-1"
-    And the ward select should be "W-1"
+    When the user selects the appl_id "20240601-0919569", the addess "đại trung Xã Đại Đồng Tiên Du Tỉnh Bắc Ninh" and the field collector "FC002533" to the map
+    Then the province select should be "Bắc Ninh"
+    And the district select should be "Tiên Du"
+    And the ward select should be "Đại Đồng"

@@ -187,7 +187,7 @@ public class MapNavigationSteps {
                 if ("Hà Nội".equals(provinceName)) {
                     // Inject district options (delayed to avoid clobbering app async population)
                     try {
-                        ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("setTimeout(function(){ var dsel=document.getElementById('districtSelect'); if(dsel){ dsel.innerHTML='<option value=\'\'>-- Chọn Huyện --</option><option value=\'qd\'>Quận Ba Đình</option><option value=\'hk\'>Quận Hoàn Kiếm</option>'; dsel.dispatchEvent(new Event('change')); } }, 250);");
+                        ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("setTimeout(function(){ var dsel=document.getElementById('districtSelect'); if(dsel){ dsel.innerHTML=\"<option value=\\\"\\\">-- Chọn Huyện --</option><option value=\\\"qd\\\">Quận Ba Đình</option><option value=\\\"hk\\\">Quận Hoàn Kiếm</option>\"; dsel.dispatchEvent(new Event('change')); } }, 250);");
                     } catch (Exception e) { System.out.println("JS inject districts failed: " + e.getMessage()); }
                     // Inject a minimal district geojson and labels
                     try {

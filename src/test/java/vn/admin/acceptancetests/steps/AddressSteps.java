@@ -7,6 +7,7 @@ import io.cucumber.java.en.When;
 import net.serenitybdd.screenplay.actors.OnStage;
 import net.serenitybdd.screenplay.waits.WaitUntil;
 import vn.admin.acceptancetests.questions.MapStatus;
+import vn.admin.acceptancetests.questions.SelectLabel;
 import vn.admin.acceptancetests.questions.SelectedValue;
 import vn.admin.acceptancetests.questions.TooltipText;
 import vn.admin.acceptancetests.tasks.FetchCustomerAddresses;
@@ -15,6 +16,7 @@ import vn.admin.acceptancetests.tasks.SelectAddress;
 import vn.admin.acceptancetests.tasks.SelectFromCombobox;
 import vn.admin.acceptancetests.ui.AddressPage;
 import vn.admin.acceptancetests.ui.MapPage;
+import vn.admin.acceptancetests.support.TestContext;
 
 import static net.serenitybdd.screenplay.GivenWhenThen.seeThat;
 import static net.serenitybdd.screenplay.matchers.WebElementStateMatchers.isPresent;
@@ -30,31 +32,31 @@ public class AddressSteps {
         );
     }
 
-    @When("the user selects an address result {string} with ID {string}")
-    public void the_user_selects_an_address_result_with_id(String addressName, String addressId) {
-        OnStage.theActorInTheSpotlight().attemptsTo(
-                SelectAddress.withId(addressName, addressId)
-        );
-    }
+    // @When("the user selects an address result {string} with ID {string}")
+    // public void the_user_selects_an_address_result_with_id(String addressName, String addressId) {
+    //     OnStage.theActorInTheSpotlight().attemptsTo(
+    //             SelectAddress.withId(addressName, addressId)
+    //     );
+    // }
 
     @Then("the province select should be {string}")
-    public void the_province_select_should_be(String expectedValue) {
+    public void the_province_select_should_be(String expectedLabel) {
         OnStage.theActorInTheSpotlight().should(
-                seeThat(SelectedValue.of(MapPage.PROVINCE_SELECT), equalTo(expectedValue))
+                seeThat(SelectLabel.of(MapPage.PROVINCE_SELECT), equalTo(expectedLabel))
         );
     }
 
     @And("the district select should be {string}")
-    public void the_district_select_should_be(String expectedValue) {
+    public void the_district_select_should_be(String expectedLabel) {
         OnStage.theActorInTheSpotlight().should(
-                seeThat(SelectedValue.of(MapPage.DISTRICT_SELECT), equalTo(expectedValue))
+                seeThat(SelectLabel.of(MapPage.DISTRICT_SELECT), equalTo(expectedLabel))
         );
     }
 
     @And("the ward select should be {string}")
-    public void the_ward_select_should_be(String expectedValue) {
+    public void the_ward_select_should_be(String expectedLabel) {
         OnStage.theActorInTheSpotlight().should(
-                seeThat(SelectedValue.of(MapPage.WARD_SELECT), equalTo(expectedValue))
+                seeThat(SelectLabel.of(MapPage.WARD_SELECT), equalTo(expectedLabel))
         );
     }
 
@@ -102,15 +104,19 @@ public class AddressSteps {
     @When("the user selects the appl_id {string}, the addess {string} and the field collector {string} to the map")
     public void theUserSelectsTheAppl_idTheAddessAndTheFieldCollectorFc_idToTheMap(String applId, String address, String fcId) {
         OnStage.theActorInTheSpotlight().attemptsTo(
-                SelectFromCombobox.value(applId)
+                SelectFromCombobox.label(applId)
                         .from(AddressPage.CUSTOMER_COMBO)
                         .andSelectFirstResult(AddressPage.FIRST_CUSTOMER_RESULT),
-                FetchCustomerAddresses.forApplId(applId),
-                SelectFromCombobox.value(address)
+                FetchCustomerAddresses.forApplId(applId)
+        );
+        OnStage.theActorInTheSpotlight().attemptsTo(
+                SelectFromCombobox.label(address)
                         .from(AddressPage.ADDRESS_COMBO)
                         .andSelectFirstResult(AddressPage.FIRST_ADDRESS_RESULT),
-                FetchSelectedCustomerAddress.forAddress(applId, address),
-                SelectFromCombobox.value(fcId)
+                FetchSelectedCustomerAddress.forAddress(applId, address)
+        );
+        OnStage.theActorInTheSpotlight().attemptsTo(
+                SelectFromCombobox.label(fcId)
                         .from(AddressPage.FC_COMBO)
                         .andSelectFirstResult(AddressPage.FIRST_FC_RESULT)
         );

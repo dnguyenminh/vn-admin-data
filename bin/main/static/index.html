@@ -172,6 +172,9 @@
         .predicted-marker { text-shadow: 0 1px 0 rgba(255,255,255,0.6); background: transparent; border-radius: 12px; }
         /* Make predicted icon more visible and consistent with the UI control */
         .predicted-marker { font-size: 16px; line-height: 16px; display:inline-flex; align-items:center; justify-content:center; }
+        /* Last checkin marker should match legend/focus control (pin icon) */
+        .last-checkin { font-size: 18px; line-height: 18px; display:inline-flex; align-items:center; justify-content:center; background: transparent; }
+        .leaflet-marker-pane .last-checkin { z-index: 2147483648 !important; pointer-events: auto !important; position: absolute !important; }
         /* Connector label (permanent tooltip) styling */
         .leaflet-tooltip.connector-label { background: rgba(243,156,18,0.95); color: #fff; border-radius: 6px; padding: 2px 6px; font-weight:600; font-size:11px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
         /* Acceptance test override: ensure predicted-marker is visible and topmost in headless runs */
@@ -312,6 +315,6 @@
         }
     </script>
     <!-- Legacy inline script removed: functionality moved to ES modules in /js/*.js (App, UIManager, MapManager, ApiClient). -->
-    <div id="logConsole" style="position:fixed; bottom:0; left:0; right:0; background:black; color:white; font-family:monospace; font-size:12px; max-height:200px; overflow:auto; z-index:10000;"></div></body>
+</body>
 
 </html>

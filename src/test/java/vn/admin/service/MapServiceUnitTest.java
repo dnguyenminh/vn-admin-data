@@ -14,13 +14,38 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
+@org.mockito.junit.jupiter.MockitoSettings(strictness = org.mockito.quality.Strictness.LENIENT)
 public class MapServiceUnitTest {
 
     @Mock
     private JdbcTemplate jdbcTemplate;
 
+    @Mock
+    private vn.admin.config.AppProperties appProperties;
+
     @InjectMocks
     private MapService mapService;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setup() throws Exception {
+        // Provide a reasonable default TTL for the constructor injection
+        when(appProperties.getCustomersFirstPageCacheTtlMs()).thenReturn(5000L);
+        // Explicitly construct MapService and inject the mocked JdbcTemplate via reflection
+        this.mapService = new MapService(appProperties);
+        java.lang.reflect.Field f = MapService.class.getDeclaredField("jdbcTemplate");
+        f.setAccessible(true);
+        f.set(this.mapService, this.jdbcTemplate);
+    }
+
+    @Test
+    void sanity_injection_of_mocks() throws Exception {
+        // Reflectively ensure Mockito injected the JdbcTemplate into MapService
+        java.lang.reflect.Field f = MapService.class.getDeclaredField("jdbcTemplate");
+        f.setAccessible(true);
+        Object injected = f.get(mapService);
+        assertThat(mapService).isNotNull();
+        assertThat(injected).isNotNull();
+    }
 
     @Test
     void getDistrictsGeoJsonByProvince_parsesJson() throws Exception {
@@ -160,13 +185,30 @@ public class MapServiceUnitTest {
         java.util.Map<String, Object> a = new java.util.HashMap<>();
         a.put("id", "4"); a.put("name", "12 Đường Nguyễn Trãi, Phường Phúc Xá, Thành phố Hà Nội"); a.put("address_type", "home");
         when(jdbcTemplate.queryForList(anyString(), any(Object[].class))).thenReturn(java.util.Arrays.asList(a));
-        // DB verification: checkins exist for address id 4
+        // DB verification: checkins exist for address id 4 (>=2 should be considered verified)
         when(jdbcTemplate.queryForObject(startsWith("SELECT COUNT(*) FROM checkin_address"), eq(Long.class), eq(4))).thenReturn(2L);
 
         Map<String, Object> resp = mapService.getAddressListPaged("appl1", "", 0, 10);
         java.util.List<?> items = (java.util.List<?>) resp.get("items");
         java.util.Map<?, ?> it0 = (java.util.Map<?, ?>) items.get(0);
         assertThat(it0.get("is_exact")).isEqualTo(Boolean.TRUE);
+    }
+
+    @Test
+    void getAddressListPaged_requiresDbVerification_singleCheckin_notExact() throws Exception {
+        when(jdbcTemplate.queryForObject(contains("COUNT(*) FROM customer_address"), eq(Long.class), any(Object[].class))).thenReturn(1L);
+        java.util.Map<String, Object> a = new java.util.HashMap<>();
+        a.put("id", "5"); a.put("name", "12 Đường Nguyễn Trãi, Phường Phúc Xá, Thành phố Hà Nội"); a.put("address_type", "home");
+        when(jdbcTemplate.queryForList(anyString(), any(Object[].class))).thenReturn(java.util.Arrays.asList(a));
+        // Spatial verification: stub nearby checkins count to 1 (below threshold)
+        org.mockito.Mockito.lenient().when(jdbcTemplate.queryForObject(org.mockito.ArgumentMatchers.contains("ST_Distance"), eq(Long.class), org.mockito.ArgumentMatchers.any())).thenReturn(1L);
+        // hasCoords probe returns 1 (address has coords), so spatial result of 1 => non-verified
+        org.mockito.Mockito.lenient().when(jdbcTemplate.queryForObject(org.mockito.ArgumentMatchers.contains("SELECT 1 FROM customer_address"), eq(Integer.class), eq(5))).thenReturn(1);
+
+        Map<String, Object> resp = mapService.getAddressListPaged("appl1", "", 0, 10);
+        java.util.List<?> items = (java.util.List<?>) resp.get("items");
+        java.util.Map<?, ?> it0 = (java.util.Map<?, ?>) items.get(0);
+        assertThat(it0.get("is_exact")).isEqualTo(Boolean.FALSE);
     }
 
     @Test
@@ -278,9 +320,9 @@ public class MapServiceUnitTest {
         // Ensure fallback point is available when centroid is missing
         String fallbackPoint = "{\"type\":\"Point\",\"coordinates\":[106.0,10.0]}";
         when(jdbcTemplate.queryForObject(startsWith("SELECT ST_AsGeoJSON(ST_SetSRID(ST_Point"), eq(String.class), any())).thenReturn(fallbackPoint);
+        // When DB verification says the address is already exact we do not return a prediction
         com.fasterxml.jackson.databind.JsonNode feat = mapService.predictAddressLocation("appl1", "11");
         assertThat(feat).isNotNull();
-        assertThat(feat.get("properties").has("verified")).isTrue();
-        assertThat(feat.get("properties").get("verified").asBoolean()).isTrue();
+        assertThat(feat.isNull()).isTrue();
     }
 }

@@ -73,10 +73,6 @@ CREATE TABLE backup_vn_provinces AS TABLE vn_provinces;
 ```bash
 ./gradlew bootRun
 ```
-- Run frontend (from `web/`):
-```bash
-cd web && npm ci && npm run dev
-```
 
 ## Next immediate steps I can implement
 - Create migration SQL file adding the recommended indexes (non-destructive).

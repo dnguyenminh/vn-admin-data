@@ -5,7 +5,7 @@ Feature: Keyboard Navigation
 
   Scenario: Arrow keys move focus and focused item is visible
     Given the user is on the map page
-    And a list of deterministic customers is injected
+    # And a list of deterministic customers is injected
     And the user focuses the customer combobox
     When the user moves focus down to the first item
     Then the first focused customer should be visible

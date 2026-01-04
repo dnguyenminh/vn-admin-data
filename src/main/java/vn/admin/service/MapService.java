@@ -734,12 +734,43 @@ public class MapService {
             try {
                 // Parse the id into an integer to avoid driver-specific issues with casting
                 int aid = Integer.parseInt(addressId);
+
+                // Strategy: prefer spatial verification when address coordinates exist.
+                // Count checkins whose point is within a small radius (e.g. 500m) of the stored address coords.
+                final int RADIUS_M = 500; // meters
+                try {
+                    final String distanceSql = "SELECT COUNT(*) FROM checkin_address c JOIN customer_address ca ON ca.id = c.customer_address_id " +
+                            "WHERE ca.id = ? AND c.field_lat IS NOT NULL AND c.field_long IS NOT NULL AND ca.address_lat IS NOT NULL AND ca.address_long IS NOT NULL " +
+                            "AND ST_Distance(ST_SetSRID(ST_Point(c.field_long::double precision, c.field_lat::double precision),4326)::geography, ST_SetSRID(ST_Point(ca.address_long::double precision, ca.address_lat::double precision),4326)::geography) <= ?";
+                    Long nearCnt = jdbcTemplate.queryForObject(distanceSql, Long.class, aid, RADIUS_M);
+                    if (log.isDebugEnabled()) log.debug("dbVerifyAddressById (spatial): addressId={}, nearCount={}", addressId, nearCnt);
+                    if (nearCnt != null && nearCnt >= 2) return true;
+
+                    // If address has coords (spatial query ran), but insufficient nearby checkins -> consider not verified
+                    final String hasCoordsSql = "SELECT 1 FROM customer_address WHERE id = ? AND address_lat IS NOT NULL AND address_long IS NOT NULL LIMIT 1";
+                    try {
+                        Integer hasCoords = jdbcTemplate.queryForObject(hasCoordsSql, Integer.class, aid);
+                        if (hasCoords != null && hasCoords == 1) {
+                            return false; // coords present but not enough nearby checkins
+                        }
+                    } catch (Exception e) {
+                        // If this specific probe fails, fall through to fallback count below
+                        if (log.isDebugEnabled()) log.debug("dbVerifyAddressById: hasCoords probe failed for addressId={}", addressId, e);
+                    }
+                } catch (Exception e) {
+                    if (log.isDebugEnabled()) log.debug("dbVerifyAddressById: spatial query failed for addressId={}", addressId, e);
+                    // Fall through to non-spatial fallback
+                }
+
+                // Fallback: when address coords are absent or spatial check didn't apply, use simple count
                 Long cnt = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM checkin_address WHERE customer_address_id = ?", Long.class, aid);
-                return cnt != null && cnt > 0;
+                if (log.isDebugEnabled()) log.debug("dbVerifyAddressById (fallback): addressId={}, checkinCount={}", addressId, cnt);
+                return cnt != null && cnt >= 2;
             } catch (NumberFormatException nfe) {
                 return false;
             } catch (Exception e) {
                 // Any DB error -> conservative false
+                if (log.isDebugEnabled()) log.debug("dbVerifyAddressById: exception for addressId={}", addressId, e);
                 return false;
             }
         }
@@ -816,6 +847,32 @@ public class MapService {
             log.warn("getCheckinsGeoJsonByAppl failed for applId={}, fcId={}. SQL: {}", applId, fcId, featuresSql, e);
             return emptyFeatureCollection();
         }
+    }
+
+    /**
+     * Debug helper: return addresses for an application with checkin_counts and a 'would_be_verified_by_new_rule' boolean.
+     * This is intended as a developer-only diagnostic endpoint and should only be called in dev/test contexts.
+     */
+    public java.util.List<java.util.Map<String, Object>> getAddressVerification(String applId) {
+        final String sql = "SELECT ca.id::text AS address_id, ca.address, COUNT(c.id) AS checkin_count " +
+                "FROM customer_address ca LEFT JOIN checkin_address c ON c.customer_address_id = ca.id " +
+                "WHERE ca.appl_id = ? GROUP BY ca.id, ca.address ORDER BY ca.id";
+        java.util.List<java.util.Map<String, Object>> out = new java.util.ArrayList<>();
+        try {
+            java.util.List<java.util.Map<String, Object>> rows = jdbcTemplate.query(sql, new Object[] { applId }, (rs, rowNum) -> {
+                java.util.Map<String, Object> m = new java.util.HashMap<>();
+                m.put("address_id", rs.getString("address_id"));
+                m.put("address", rs.getString("address"));
+                long cnt = rs.getLong("checkin_count");
+                m.put("checkin_count", cnt);
+                m.put("would_be_verified_by_new_rule", cnt >= 2);
+                return m;
+            });
+            out.addAll(rows);
+        } catch (Exception e) {
+            log.warn("getAddressVerification failed for applId={}", applId, e);
+        }
+        return out;
     }
 
     // Distinct fc_id values for a customer

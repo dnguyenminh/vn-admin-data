@@ -14,8 +14,7 @@ Key context
 
 Getting started (commands & env)
 - Build: `./gradlew build`
-- Run entire app (default H2): `./gradlew run`
-- Run web only: `./gradlew :web:bootRun` or `./gradlew bootRun` depending on how you want to start (README has examples).
+- Run entire app (default H2): `./gradlew run` or `./gradlew bootRun` depending on how you want to start (README has examples).
 - DB env (for Postgres): set `DB_URL`, `DB_USER`, `DB_PASSWORD` before starting. Example: `export DB_URL=jdbc:postgresql://localhost:5432/gis`
 - Big-data import: `osm2pgsql` is used outside Java to load PBF into PostGIS (see README examples).
 

@@ -23,7 +23,7 @@ Run the app (default uses an H2 TCP database at `./data/vn_admin_db`):
 ./gradlew run
 ```
 
-Run the app in development mode (enables dev-only features such as redirecting `/` to a running Nuxt dev server):
+Run the app in development mode (enables dev-only features):
 
 ```bash
 # Option A: use the convenience Gradle task
@@ -31,19 +31,9 @@ Run the app in development mode (enables dev-only features such as redirecting `
 
 # Option B: set Spring profile to `dev`
 ./gradlew bootRun -Dspring.profiles.active=dev
-
-# NOTE: ensure your Nuxt dev server is running (default: http://localhost:3001)
+```
 
 **Dev profile note:** when running with the `dev` profile (`-Dspring.profiles.active=dev` or `SPRING_PROFILES_ACTIVE=dev`), Flyway is configured to run `baselineOnMigrate=true` for local convenience so existing local databases without a `flyway_schema_history` table will be baselined automatically. This makes `bootRun` easier to start against a pre-populated development database; do not use this setting for production databases without understanding the implications.
-```
-
-Start both backend (dev profile) and frontend together (convenience):
-
-```bash
-./scripts/dev.sh
-
-# Press Ctrl+C to stop both processes; logs are written to `logs/dev/`.
-```
 
 What it does:
   - `level1_provinces(name, ubnd_lat, ubnd_lon, center_lat, center_lon, geom_geojson)`
@@ -238,28 +228,6 @@ Lưu ý:
 - Bạn có thể tính tương tự cho `admin_level='6'` (huyện) và xuất CSV cho `level2_districts`.
 
 Tip: Nếu muốn chính xác hơn khi join tên, có thể dùng các hàm fuzzy matching (ví dụ pg_trgm trên Postgres) hoặc xuất thêm thông tin geo + kiểm tra bằng không gian (ví dụ ST_Contains) để liên kết tự động.
-
----
-
-## Web UI (quick map)
-
-The repository includes a small Spring Boot web app that serves a simple Leaflet-based map at the root (`/`). The front page loads province boundaries from `/api/provinces` and draws them on a Leaflet map.
-
-Run the web app locally:
-
-```bash
-# Set DB connection (if different from defaults)
-export DB_URL=jdbc:postgresql://localhost:5432/vn_admin_db
-export DB_USER=vn_admin
-export DB_PASSWORD=postgres
-
-# Start the web app
-./gradlew :web:bootRun
-
-# Open http://localhost:8080/ in your browser
-```
-
-You can extend the web app by adding endpoints for districts and wards, or by adding client-side controls to toggle layers and query features.
 
 ---
 
