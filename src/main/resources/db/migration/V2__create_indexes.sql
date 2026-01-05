@@ -10,5 +10,11 @@ CREATE INDEX IF NOT EXISTS idx_customers_appl_btree ON customers (appl_id);
 CREATE INDEX IF NOT EXISTS idx_customers_appl_trgm ON customers USING gin (appl_id gin_trgm_ops);
 
 -- Checkins indexes
-CREATE INDEX IF NOT EXISTS idx_checkin_applid_id_nonnull_loc ON checkin_address (appl_id, id) WHERE field_lat IS NOT NULL AND field_long IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_checkin_applid_fcid ON checkin_address (appl_id, fc_id);
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'checkin_address') THEN
+    CREATE INDEX IF NOT EXISTS idx_checkin_applid_id_nonnull_loc ON checkin_address (appl_id, id) WHERE field_lat IS NOT NULL AND field_long IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_checkin_applid_fcid ON checkin_address (appl_id, fc_id);
+  END IF;
+END
+$$;

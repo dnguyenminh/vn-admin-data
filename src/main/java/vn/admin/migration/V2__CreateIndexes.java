@@ -26,9 +26,14 @@ public class V2__CreateIndexes extends BaseJavaMigration {
             st.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_customers_appl_btree ON customers (appl_id);");
             st.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_customers_appl_trgm ON customers USING gin (appl_id gin_trgm_ops);");
 
-            // Checkin indexes
-            st.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_checkin_applid_id_nonnull_loc ON checkin_address (appl_id, id) WHERE field_lat IS NOT NULL AND field_long IS NOT NULL;");
-            st.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_checkin_applid_fcid ON checkin_address (appl_id, fc_id);");
+            // Checkin indexes - only create if the table exists
+            try (java.sql.ResultSet rs = st.executeQuery("SELECT 1 FROM pg_tables WHERE tablename = 'checkin_address' LIMIT 1")) {
+                if (rs.next()) {
+                    st.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_checkin_applid_id_nonnull_loc ON checkin_address (appl_id, id) WHERE field_lat IS NOT NULL AND field_long IS NOT NULL;");
+                    st.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_checkin_applid_fcid ON checkin_address (appl_id, fc_id);");
+                }
+            }
+
         }
     }
 }
