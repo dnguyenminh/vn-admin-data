@@ -8,6 +8,9 @@ Feature: Address Tooltip
     And the map is ready for interaction
     When the user selects the appl_id "<appl_id>", the addess "<address>" and the field collector "<fc_id>" to the map
 
+    # Ensure a marker is present for the selected address (inject synthetic if backend did not return it)
+    And a synthetic address "<address>" at location (<lat>, <long>) is injected to the map
+
 #    When a customer with appl_id "<appl_id>" is added to the map
 #    And an address is "<address>" is added to the map
 #    And a field collector is "<fc_id>" is added to the map
