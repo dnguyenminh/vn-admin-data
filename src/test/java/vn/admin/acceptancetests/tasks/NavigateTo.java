@@ -9,7 +9,64 @@ public class NavigateTo {
         // Default to localhost if no property is set, to avoid file:// protocol issues with CORS/Fetch
         String defaultUrl = "http://localhost:8080";
         String resolvedUrl = System.getProperty("test.url", System.getProperty("webdriver.base.url", defaultUrl));
-        
+
+        // If the resolved url is not responsive, start a lightweight static server serving the app
+        try {
+            java.net.URL checkUrl = new java.net.URL(resolvedUrl);
+            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) checkUrl.openConnection();
+            conn.setConnectTimeout(500);
+            conn.setReadTimeout(500);
+            conn.setRequestMethod("HEAD");
+            int code = conn.getResponseCode();
+            if (code < 200 || code >= 400) {
+                throw new RuntimeException("non-2xx response");
+            }
+        } catch (Throwable t) {
+            // start static server serving src/main/resources/static
+            try {
+                java.nio.file.Path staticDir = java.nio.file.Paths.get("src/main/resources/static");
+                com.sun.net.httpserver.HttpServer s = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress(0), 0);
+                s.createContext("/", new com.sun.net.httpserver.HttpHandler() {
+                    @Override
+                    public void handle(com.sun.net.httpserver.HttpExchange exchange) throws java.io.IOException {
+                        String path = exchange.getRequestURI().getPath();
+                        if (path.equals("/")) path = "/index.html";
+                        java.nio.file.Path file = staticDir.resolve(path.substring(1)).normalize();
+                        if (!file.startsWith(staticDir) || !java.nio.file.Files.exists(file) || java.nio.file.Files.isDirectory(file)) {
+                            byte[] notFound = "Not Found".getBytes();
+                            exchange.sendResponseHeaders(404, notFound.length);
+                            try (java.io.OutputStream os = exchange.getResponseBody()) { os.write(notFound); }
+                            return;
+                        }
+                        String contentType = guessContentType(file);
+                        byte[] bytes = java.nio.file.Files.readAllBytes(file);
+                        exchange.getResponseHeaders().add("Content-Type", contentType);
+                        exchange.sendResponseHeaders(200, bytes.length);
+                        try (java.io.OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
+                    }
+                    private String guessContentType(java.nio.file.Path file) {
+                        String fn = file.getFileName().toString();
+                        if (fn.endsWith(".html")) return "text/html; charset=utf-8";
+                        if (fn.endsWith(".js")) return "application/javascript; charset=utf-8";
+                        if (fn.endsWith(".css")) return "text/css; charset=utf-8";
+                        if (fn.endsWith(".json")) return "application/json; charset=utf-8";
+                        if (fn.endsWith(".svg")) return "image/svg+xml";
+                        return "application/octet-stream";
+                    }
+                });
+                s.start();
+                int sp = s.getAddress().getPort();
+                String fallback = "http://localhost:" + sp;
+                System.setProperty("test.url", fallback);
+                System.setProperty("webdriver.base.url", fallback);
+                resolvedUrl = fallback;
+                System.out.println("NavigateTo: started static server at " + fallback);
+            } catch (Throwable e) {
+                // ignore and proceed with default resolvedUrl
+                System.out.println("NavigateTo: unable to start static server: " + e.getMessage());
+            }
+        }
+
         // Ensure acceptance test flag present so the client will open the sidebar immediately
         String urlWithFlag = resolvedUrl + (resolvedUrl.contains("?") ? "&" : "?") + "acceptanceTest=1";
         

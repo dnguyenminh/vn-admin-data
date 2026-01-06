@@ -9,6 +9,12 @@ CREATE INDEX IF NOT EXISTS idx_customers_appl_btree ON customers (appl_id);
 -- For production systems with zero-downtime requirements, consider running index creation manually or configuring Flyway to run non-transactionally.
 CREATE INDEX IF NOT EXISTS idx_customers_appl_trgm ON customers USING gin (appl_id gin_trgm_ops);
 
--- Checkins indexes
-CREATE INDEX IF NOT EXISTS idx_checkin_applid_id_nonnull_loc ON checkin_address (appl_id, id) WHERE field_lat IS NOT NULL AND field_long IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_checkin_applid_fcid ON checkin_address (appl_id, fc_id);
+-- Checkins indexes (create only if table exists to avoid failing in clean test DBs)
+DO $$
+BEGIN
+  IF to_regclass('public.checkin_address') IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS idx_checkin_applid_id_nonnull_loc ON checkin_address (appl_id, id) WHERE field_lat IS NOT NULL AND field_long IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_checkin_applid_fcid ON checkin_address (appl_id, fc_id);
+  END IF;
+END
+$$;

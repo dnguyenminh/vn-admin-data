@@ -209,3 +209,10 @@ tasks.register('bootRunDev', org.springframework.boot.gradle.tasks.run.BootRun) 
     systemProperty 'spring.profiles.active', 'dev'
     jvmArgs = ['-Dspring.profiles.active=dev']
 }
+
+// Make the default bootRun use the dev profile so './gradlew bootRun' works for local development
+// (This avoids migration validation failures and enables the frontend proxy behavior by default.)
+tasks.named('bootRun') {
+    systemProperty 'spring.profiles.active', 'dev'
+    jvmArgs = ['-Dspring.profiles.active=dev']
+}

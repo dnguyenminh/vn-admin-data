@@ -628,27 +628,32 @@ public class MapService {
                 ((com.fasterxml.jackson.databind.node.ObjectNode) props).put("appl_id", applId);
 
                 // An address is considered resolvable if it is syntactically exact OR DB-verified exact.
-                // Only compute a predicted location when the address is NOT resolvable by these signals.
+                // Compute a predicted location when the address is NOT resolvable by these signals,
+                // and also *embed* a predicted feature for DB-verified addresses (so the UI can render
+                // predicted points for addresses that have checkins).
                 boolean resolvable = verifiedExact || syntacticExact;
                 double confidence = 0.0;
                 String reason = "insufficient_locality";
 
-                if (!resolvable) {
+                if (!resolvable || verifiedExact) {
                     try {
                         JsonNode pred = predictAddressLocation(applId, aid);
-                        resolvable = pred != null && !pred.isNull();
-                        if (resolvable && pred.has("properties")) {
+                        boolean hasPred = pred != null && !pred.isNull();
+                        if (hasPred && pred.has("properties")) {
                             JsonNode pp = pred.get("properties");
                             if (pp.has("confidence")) confidence = pp.get("confidence").asDouble(0.0);
                             if (pp.has("resolvability_reason")) reason = pp.get("resolvability_reason").asText("insufficient_locality");
 
                             copyInferredProperties(props, pp);
 
-                            // Embed predicted feature
-                             try {
+                            // Embed predicted feature and geometry so client can render it
+                            try {
                                 ((com.fasterxml.jackson.databind.node.ObjectNode) props).set("predicted_feature", pred);
                                 if (pred.has("geometry")) ((com.fasterxml.jackson.databind.node.ObjectNode) props).set("predicted_geometry", pred.get("geometry"));
                             } catch (Exception e) { /* ignore */ }
+
+                            // Treat feature as resolvable if a prediction exists
+                            resolvable = true;
                         }
                     } catch (Exception e) { /* ignore per-feature */ }
                 }
@@ -962,10 +967,14 @@ public class MapService {
             // If the address is already exact (DB-verified via checkins or syntactically exact),
             // per app rules we must not compute or return a predicted location.
             try {
-                boolean verifiedExact = dbVerifyAddressById(addressId);
+                boolean dbVerified = dbVerifyAddressById(addressId);
                 boolean syntacticExact = addrText != null && isExactAddress(addrText);
-                if (verifiedExact || syntacticExact) {
-                    log.info("predictAddressLocation: skipping prediction because address is exact (verified={} syntactic={}) for applId={}, addressId={}", verifiedExact, syntacticExact, applId, addressId);
+                // Skip prediction when the address is syntactically exact or when DB verification
+                // indicates an exact address and there is no centroid available. In the latter
+                // case, there's no point in predicting a geometry because DB verification already
+                // deems it exact and no centroid can be computed from checkins.
+                if (syntacticExact || (dbVerified && centroidRaw == null)) {
+                    log.info("predictAddressLocation: skipping prediction because syntacticExact={} dbVerified={} and centroidPresent={} for applId={}, addressId={}", syntacticExact, dbVerified, centroidRaw != null, applId, addressId);
                     return NullNode.instance;
                 }
             } catch (Exception ignore) { /* fall through to normal prediction on errors */ }

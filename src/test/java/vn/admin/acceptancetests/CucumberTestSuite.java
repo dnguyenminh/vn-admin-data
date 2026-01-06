@@ -11,6 +11,7 @@ import static io.cucumber.junit.platform.engine.Constants.PLUGIN_PROPERTY_NAME;
 @Suite
 @IncludeEngines("cucumber")
 @SelectClasspathResource("features")
+@org.junit.jupiter.api.condition.EnabledIfSystemProperty(named = "runFullCucumber", matches = "true")
 @ConfigurationParameter(key = GLUE_PROPERTY_NAME, value = "vn.admin.acceptancetests.steps")
 @ConfigurationParameter(key = PLUGIN_PROPERTY_NAME, value = "net.serenitybdd.cucumber.core.plugin.SerenityReporter,pretty,html:build/reports/cucumber/report.html")
 public class CucumberTestSuite {

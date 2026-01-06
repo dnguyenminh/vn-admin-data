@@ -603,29 +603,6 @@ class App {
             console.warn('Reverse lookup failed for address', addrId, e);
         }
 
-        // Fetch and show predicted marker for this address so user sees the predicted location
-        try {
-            // prefer embedded prediction if present on the currently-loaded address layer
-            let embeddedPred = null;
-            try {
-                const markers = this.map._addressMarkersById || {};
-                Object.values(markers).forEach(al => {
-                    try {
-                        const id = al.feature && al.feature.properties && al.feature.properties.id || (al.featureProps && al.featureProps.id);
-                        const props = al.feature && al.feature.properties ? al.feature.properties : (al.featureProps || {});
-                        if (String(id) === String(addrId) && props && props.predicted_feature) {
-                            embeddedPred = props.predicted_feature;
-                        }
-                    } catch (e) { /* ignore */ }
-                });
-            } catch (e) { /* ignore if address markers missing */ }
-            if (embeddedPred) {
-                this.map.showPredictedAddress(embeddedPred);
-            } else {
-                const pred = await this.api.getPredictedAddress(this.selectedCustomerId || this.ui.getSelectedCustomerId(), addrId);
-                if (pred && pred.geometry) this.map.showPredictedAddress(pred);
-            }
-        } catch (e) { /* ignore */ }
 
         // Enable/disable 'Show predicted' button: use centralized logic
         try { await this.updateShowFcPredEnabled(); } catch (e) { /* ignore UI failures */ }

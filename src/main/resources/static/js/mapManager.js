@@ -188,17 +188,16 @@ class MapManager {
                     console.log('[MapManager] preserving known exactness for id=', idStr);
                 }
             }
-            // Add predicted if present
+            // Add predicted if present (do NOT auto-render predicted markers by default)
+            // Only store predicted coordinates for use by other features (e.g., distance calculations
+            // in checkin popups). Rendering a predicted marker should be performed explicitly via
+            // `showPredictedAddress(feature)` so UI control (prediction button) governs visibility.
             if (p.predicted_feature) {
-                const pc = p.predicted_feature.geometry.coordinates;
-                const platlng = [pc[1], pc[0]];
-                const predMarker = L.marker(platlng, { icon: L.divIcon({ className: 'predicted-marker', html: '🔮', iconSize: [24,24] }) });
-                predMarker.bindPopup(`<div><strong>Predicted address</strong><br/>appl_id: ${this._escapeHtml(p.appl_id)}</div>`);
-                try { predMarker.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(predMarker); } catch (e2) { console.error('[MapManager] add predicted marker failed', e, e2); } }
-                const line = L.polyline([latlng, platlng], { color: '#f39c12', weight: 2, dashArray: '4 6' });
-                line.bindTooltip(`${Math.round(L.latLng(latlng[0], latlng[1]).distanceTo(L.latLng(platlng[0], platlng[1])))} m`, { permanent: true, className: 'connector-label' });
-                try { line.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(line); } catch (e2) { console.error('[MapManager] add predicted line failed', e, e2); } }
-                if (p.id) this._predictedLatLngByAddressId[String(p.id)] = L.latLng(platlng[0], platlng[1]);
+                try {
+                    const pc = p.predicted_feature.geometry.coordinates;
+                    const platlng = [pc[1], pc[0]];
+                    if (p.id) this._predictedLatLngByAddressId[String(p.id)] = L.latLng(platlng[0], platlng[1]);
+                } catch (e) { /* ignore malformed predicted_feature */ }
             }
         });
 
@@ -341,6 +340,15 @@ class MapManager {
                     } catch (e) { /* ignore per-layer errors */ }
                 });
             }
+
+            // Also remove any standalone DOM elements that may have been injected directly
+            // into the map container (test fallbacks or legacy code may append a .predicted-marker element).
+            try {
+                if (typeof document !== 'undefined' && document.querySelectorAll) {
+                    const nodes = document.querySelectorAll('.predicted-marker') || [];
+                    Array.prototype.slice.call(nodes).forEach(n => { try { n.parentNode && n.parentNode.removeChild(n); } catch (e) {} });
+                }
+            } catch (e) { /* ignore DOM cleanup errors */ }
         } catch (e) { /* ignore */ }
     }
 

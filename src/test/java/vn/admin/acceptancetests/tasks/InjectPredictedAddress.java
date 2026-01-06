@@ -17,7 +17,7 @@ public class InjectPredictedAddress implements Task {
         if (geoJson == null) {
             // Provide a deterministic synthetic fallback so tests remain deterministic even when DB has no recent checkins
             System.out.println("InjectPredictedAddress: no recent checkin in TestContext — using synthetic fallback");
-            geoJson = "{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\",\"properties\":{\"id\":\"SYN-1\",\"appl_id\":\"T-LOCAL\",\"fc_id\":\"FC_TEST\",\"customer_address_id\":\"ADDR-1\",\"predicted_feature\":{\"geometry\":{\"type\":\"Point\",\"coordinates\":[105.012,10.01]}}},\"geometry\":{\"type\":\"Point\",\"coordinates\":[105.002,10.001]}}]}";
+            geoJson = "{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\",\"properties\":{\"id\":\"SYN-1\",\"appl_id\":\"T-LOCAL\",\"fc_id\":\"FC_TEST\",\"customer_address_id\":\"ADDR-1\",\"predicted_feature\":{\"geometry\":{\"type\":\"Point\",\"coordinates\":[105.012,10.01]},\"properties\":{\"addressId\":\"SYN-1\"}}},\"geometry\":{\"type\":\"Point\",\"coordinates\":[105.002,10.001]}}]}";
         }
         ((JavascriptExecutor) BrowseTheWeb.as(actor).getDriver()).executeScript("window.__testGeo = JSON.parse(arguments[0]);", geoJson);
         ((JavascriptExecutor) BrowseTheWeb.as(actor).getDriver()).executeScript("if(window.app && window.app.map && typeof window.app.map.showAddressesGeojson === 'function'){ try{ window.app.map.showAddressesGeojson(window.__testGeo); }catch(e){} try{ if(window.app.map && typeof window.app.map.showPredictedAddress === 'function'){ window.app.map.showPredictedAddress(window.__testGeo.features[0].properties.predicted_feature); } }catch(e){} }");

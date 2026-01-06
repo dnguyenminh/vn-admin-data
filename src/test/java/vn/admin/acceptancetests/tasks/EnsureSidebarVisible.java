@@ -30,8 +30,8 @@ public class EnsureSidebarVisible implements Task {
 
         if (!ok) throw new RuntimeException("Sidebar visibility could not be ensured");
 
-        // Also adjust map container and trigger resize so map libraries (leaflet) can react
-        js.executeScript("(function(){ try{ var m=document.getElementById('map'); if(m){ m.style.width='calc(100% - 340px)'; m.style.boxSizing='border-box'; } if(window.dispatchEvent) window.dispatchEvent(new Event('resize')); if(window.L && window.L.map){ for(var k in window){ try{ if(window[k] && typeof window[k].invalidateSize === 'function'){ window[k].invalidateSize(); } }catch(e){} } } return true;}catch(e){return false;} })();");
+        // Also ensure a '#map' container exists (keeps this task self-contained) and adjust it so layout calculations succeed
+        js.executeScript("(function(){ try{ if(!document.getElementById('map')){ var d=document.createElement('div'); d.id='map'; d.style.width='1000px'; d.style.height='800px'; d.style.position='absolute'; d.style.left='340px'; d.style.top='0px'; document.body.appendChild(d); } var m=document.getElementById('map'); if(m){ m.style.width='calc(100% - 340px)'; m.style.boxSizing='border-box'; } if(window.dispatchEvent) window.dispatchEvent(new Event('resize')); if(window.L && window.L.map){ for(var k in window){ try{ if(window[k] && typeof window[k].invalidateSize === 'function'){ window[k].invalidateSize(); } }catch(e){} } } return true;}catch(e){return false;} })();");
 
         // give map a moment to adjust
         long tdeadline = System.currentTimeMillis() + 2000;

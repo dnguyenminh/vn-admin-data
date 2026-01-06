@@ -29,9 +29,26 @@ public class FetchSelectedCustomerAddress extends AbstractFetchCustomerAddress i
     @Override
     public <T extends Actor> void performAs(T actor) {
         Map<String, JsonNode> addressMap = actor.recall("customer_addresses_" + applId);
-        if (addressMap != null && addressMap.containsKey(address)) {
-            JsonNode feature = addressMap.get(address);
-            actor.remember("last_selected_address", feature);
+        if (addressMap != null) {
+            if (addressMap.containsKey(address)) {
+                JsonNode feature = addressMap.get(address);
+                actor.remember("last_selected_address", feature);
+            } else {
+                // Fallback: try to find a matching feature by comparing the stored 'address' property (case-insensitive contains)
+                for (Map.Entry<String, JsonNode> e : addressMap.entrySet()) {
+                    try {
+                        JsonNode f = e.getValue();
+                        JsonNode props = f.path("properties");
+                        if (!props.isMissingNode() && props.has("address")) {
+                            String a = props.get("address").asText("").toLowerCase();
+                            if (a.contains(address.toLowerCase())) {
+                                actor.remember("last_selected_address", f);
+                                break;
+                            }
+                        }
+                    } catch (Throwable ignore) { }
+                }
+            }
         }
 
     }

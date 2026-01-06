@@ -1,3 +1,4 @@
+@focus
 Feature: Legend Features
   As a User
   I want to see legends for map features

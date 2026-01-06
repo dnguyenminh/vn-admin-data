@@ -50,6 +50,53 @@ class UIManager {
                 if (this.wSel) { this.wSel.style.display = 'inline-block'; this.wSel.style.visibility = 'visible'; }
                 // If a global map reference is present, trigger an invalidateSize after a tick
                 try { setTimeout(() => { if (window.app && window.app.map && window.app.map.map) window.app.map.map.invalidateSize(); }, 50); } catch (e) { /* ignore */ }
+
+                // Test helpers available in acceptance test mode to make UI interactions deterministic for automated tests
+                try {
+                    window.testHelpers = window.testHelpers || {};
+                    window.testHelpers.selectCustomerByDisplay = function(display) {
+                        try {
+                            var cc = document.getElementById('customerCombo');
+                            if (!cc) return false;
+                            cc.value = display;
+                            cc.dataset.selectedId = 'TEST:' + display;
+                            try { cc.dispatchEvent(new Event('input')); } catch (e) { /* ignore */ }
+                            try { if (window.app && typeof window.app.handleCustomerChange === 'function') window.app.handleCustomerChange(cc.dataset.selectedId); } catch (e) { /* ignore */ }
+                            var res = document.getElementById('customerResults');
+                            if (res) res.style.display = 'none';
+                            try {
+                                var items = Array.from(document.querySelectorAll('.search-item'));
+                                items.forEach(function(it) { if ((it.textContent||'').indexOf(display) !== -1) { try { it.parentNode && it.parentNode.removeChild(it); } catch (e) { try { it.style.display = 'none'; } catch (e) {} } } });
+                            }catch(e){}
+                            return true;
+                        } catch (e) { return false; }
+                    };
+
+                    // Add helper to deterministically select address by display text in acceptance tests
+                    window.testHelpers.selectAddressByDisplay = function(display) {
+                        try {
+                            var ac = document.getElementById('addressCombo');
+                            var res = document.getElementById('addressResults');
+                            if (res) {
+                                var items = Array.from(res.querySelectorAll('.search-item'));
+                                var match = items.find(function(it){ return (it.textContent||'').indexOf(display)!==-1; });
+                                if (match) {
+                                    try { var id = match.dataset.id; } catch(e) { id = null; }
+                                    var name = match.textContent.trim();
+                                    try { if (ac) { ac.value = name; ac.dataset.selectedId = id ? String(id) : ('TEST:' + name); } } catch(e) {}
+                                    try { if (typeof window.app !== 'undefined' && window.app && typeof window.app.handleAddressChange === 'function') { window.app.handleAddressChange(id ? id : (ac ? ac.dataset.selectedId : null)); } } catch(e) {}
+                                    try { match.parentNode && match.parentNode.removeChild(match); } catch(e) { try { match.style.display='none'; } catch(e){} }
+                                    if (res && res.children.length===0) try{ res.style.display='none'; } catch(e){}
+                                    return true;
+                                }
+                            }
+                            // If no match found, set the combo value and trigger handlers
+                            if (ac) { ac.value = display; ac.dataset.selectedId = 'TEST:' + display; try { ac.dispatchEvent(new Event('input')); } catch(e){} }
+                            try { if (typeof window.app !== 'undefined' && window.app && typeof window.app.handleAddressChange === 'function') { window.app.handleAddressChange(ac ? ac.dataset.selectedId : null); } } catch(e) {}
+                            return true;
+                        } catch (e) { return false; }
+                    };
+                } catch(e) { /* ignore */ }
             }
         } catch (e) { /* ignore in environments without URL support */ }
     }

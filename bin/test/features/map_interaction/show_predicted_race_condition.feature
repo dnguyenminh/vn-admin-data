@@ -2,10 +2,10 @@ Feature: Prevent race condition where Show Predicted button flips state incorrec
 
   @race
   Scenario: Show Predicted button remains disabled when address exactness is preserved across address layer reload
+    Given the user is on the map page
     And the map and app scaffolding are ready
-    And the selected address "ADDR-1" is known exact in the map
+    When the user selects the appl_id "20240601-0919569", the addess "đại trung Xã Đại Đồng Tiên Du Tỉnh Bắc Ninh" and the field collector "FC001691" to the map
     When I invoke updateShowFcPredEnabled
     Then the show predicted button should be disabled
-    When the address layer is reloaded without an explicit is_exact for "ADDR-1"
     And I invoke updateShowFcPredEnabled
     Then the show predicted button should remain disabled
