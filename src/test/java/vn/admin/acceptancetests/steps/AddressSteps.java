@@ -395,7 +395,7 @@ public class AddressSteps {
         );
     }
 
-    @And("a synthetic address {string} at location ({double}, {double}) is injected to the map")
+    @And("^a synthetic address \"([^\"]*)\" at location \\((-?\\d+\\.?\\d*),\\s*(-?\\d+\\.?\\d*)\\) is injected to the map$")
     public void a_synthetic_address_at_location_is_injected_to_the_map(String address, double lat, double lon) {
         String safeAddr = address.replace("'", "\\'");
         String id = "SYNTH:" + safeAddr.replaceAll("\\s+", "_");
