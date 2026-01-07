@@ -118,17 +118,46 @@ class App {
         this.ui.bindShowAllCheckins(async (checked) => {
             const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
             if (!applId) return;
+
+            // Helper to ensure map layers are visible & invalidated
+            const finalize = async () => { try { await this.map.waitForMapLayersReady(2000); } catch (e) { } try { if (this.map && this.map.map && typeof this.map.map.invalidateSize === 'function') this.map.map.invalidateSize(); } catch (e) { } };
+
+            const addrId = this.selectedAddressId || this.ui.getSelectedAddressId();
+
             if (checked) {
+                if (addrId) {
+                    // Show all checkins for FCs who have checked in at the selected address
+                    const allCheckins = await this.api.getCheckinsGeoJson(applId, '', 0, 1000);
+                    const feats = (allCheckins && allCheckins.features) ? allCheckins.features : [];
+                    const fcsAtAddr = new Set();
+                    feats.forEach(f => { try { if (String((f.properties && f.properties.customer_address_id) || '') === String(addrId)) { fcsAtAddr.add(String((f.properties && f.properties.fc_id) || '')); } } catch (e) { } });
+                    if (fcsAtAddr.size === 0) {
+                        // if none found, simply show address-related checkins only
+                        const addrOnly = { type: 'FeatureCollection', features: feats.filter(f => String((f.properties && f.properties.customer_address_id) || '') === String(addrId)) };
+                        this.map.showCheckinsGeojson(addrOnly);
+                        await finalize();
+                        return;
+                    }
+                    const filtered = { type: 'FeatureCollection', features: feats.filter(f => f && f.properties && fcsAtAddr.has(String(f.properties.fc_id))) };
+                    this.map.showCheckinsGeojson(filtered);
+                    await finalize();
+                    return;
+                }
+                // No address selected: show all checkins for the customer
                 const checkins = await this.api.getCheckinsGeoJson(applId, '', 0, 1000);
                 this.map.showCheckinsGeojson(checkins);
-                try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
-                try { if (this.map && this.map.map && typeof this.map.map.invalidateSize === 'function') this.map.map.invalidateSize(); } catch (e) { }
+                await finalize();
             } else {
+                // unchecked: if FC selected, show only that FC's checkins; else if address selected show only that address' checkins; otherwise clear
                 if (this.selectedFcId) {
                     const checkins = await this.api.getCheckinsGeoJson(applId, this.selectedFcId, 0, 1000);
                     this.map.showCheckinsGeojson(checkins);
-                    try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
-                    try { if (this.map && this.map.map && typeof this.map.map.invalidateSize === 'function') this.map.map.invalidateSize(); } catch (e) { }
+                    await finalize();
+                } else if (addrId) {
+                    const allCheckins = await this.api.getCheckinsGeoJson(applId, '', 0, 1000);
+                    const addrOnly = { type: 'FeatureCollection', features: (allCheckins && allCheckins.features) ? allCheckins.features.filter(f => String((f.properties && f.properties.customer_address_id) || '') === String(addrId)) : [] };
+                    this.map.showCheckinsGeojson(addrOnly);
+                    await finalize();
                 } else {
                     this.map.clearCheckins();
                 }
@@ -500,11 +529,25 @@ class App {
         // Mark UI version so concurrent async flows don't override what we're about to set
         this._uiChangeVersion = (this._uiChangeVersion || 0) + 1;
 
+        // Clear any previously-selected address or FC when the customer changes
+        try {
+            this.selectedAddressId = null;
+            if (this.ui && typeof this.ui.setAddressValue === 'function') this.ui.setAddressValue('', '');
+            if (this.ui && typeof this.ui.hideAddressResults === 'function') this.ui.hideAddressResults();
+        } catch (e) { /* ignore */ }
+        try {
+            this.selectedFcId = null;
+            if (this.ui && typeof this.ui.setFcValue === 'function') this.ui.setFcValue('', '');
+            if (this.ui && typeof this.ui.hideFcResults === 'function') this.ui.hideFcResults();
+        } catch (e) { /* ignore */ }
+
         // load first page of addresses and checkins for this customer
         this.addressesPage = 0;
         this.addressesQ = '';
         const addressesResp = await this.api.getAddresses(applId, this.addressesQ, 0, this.addressesSize || 50);
         this.ui.populateAddresses(addressesResp);
+        // Keep address dropdown hidden after population so the UI does not show stale lists when customer changes
+        try { if (this.ui && typeof this.ui.hideAddressResults === 'function') this.ui.hideAddressResults(); } catch (e) { /* ignore */ }
 
         const addrGeo = await this.api.getAddressesGeoJson(applId, 0, this.addressesSize || 50);
         this.map.showAddressesGeojson(addrGeo);
@@ -521,6 +564,8 @@ class App {
 
         const fcids = await this.api.getCheckinFcIds(applId);
         this.ui.populateFcIds(fcids);
+        // Keep FC dropdown hidden after population so the UI does not show stale lists when customer changes
+        try { if (this.ui && typeof this.ui.hideFcResults === 'function') this.ui.hideFcResults(); } catch (e) { /* ignore */ }
     }
 
     async handleAddressChange(addrId) {
@@ -533,11 +578,60 @@ class App {
         try { console.log('[App] handleAddressChange START addrId=', addrId, 'version=', version, 'uiVersion=', uiVersion, 'app.selectedAddressId=', this.selectedAddressId, 'uiSel=', this.ui ? this.ui.getSelectedAddressId() : null); } catch (e) {}
 
         if (!addrId) {
-            // show all checkins
+            // If no address selected, respect current FC selection or clear checkins
+            // If a FC is selected, show only that FC's checkins; otherwise show nothing
             const fcId = this.selectedFcId || this.ui.getSelectedFcId();
-            this.map.filterCheckinsByFcId(fcId || '');
+            if (fcId) {
+                // Ensure we have the FC's checkins loaded (fetch and show)
+                try {
+                    const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+                    if (applId) {
+                        const checkins = await this.api.getCheckinsGeoJson(applId, fcId, 0, 1000);
+                        this.map.showCheckinsGeojson(checkins);
+                        try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
+                        try { if (this.map && this.map.map && typeof this.map.map.invalidateSize === 'function') this.map.map.invalidateSize(); } catch (e) { }
+                    }
+                } catch (e) { /* ignore */ }
+            } else {
+                this.map.clearCheckins();
+            }
             return;
         }
+
+        // When the address changes, clear any selected FC (per UX requirement)
+        try {
+            this.selectedFcId = null;
+            if (this.ui && typeof this.ui.setFcValue === 'function') this.ui.setFcValue('', '');
+            if (this.ui && typeof this.ui.hideFcResults === 'function') this.ui.hideFcResults();
+        } catch (e) { /* ignore */ }
+
+        // If the "Show all checkins" checkbox is checked, then show all checkins for
+        // any FC that has a checkin at this address (i.e., union of FCs that checked here).
+        try {
+            const showAllChecked = this.ui && this.ui.showAllCheckinsToggle && this.ui.showAllCheckinsToggle.checked;
+            if (showAllChecked) {
+                const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+                if (applId) {
+                    const allCheckins = await this.api.getCheckinsGeoJson(applId, '', 0, 1000);
+                    const feats = (allCheckins && allCheckins.features) ? allCheckins.features : [];
+                    const fcsAtAddr = new Set();
+                    feats.forEach(f => { try { if (String((f.properties && f.properties.customer_address_id) || '') === String(addrId)) { fcsAtAddr.add(String((f.properties && f.properties.fc_id) || '')); } } catch (e) { } });
+                    if (fcsAtAddr.size === 0) {
+                        // No FCs found with checkins at this address: show only the address-related checkins
+                        const addrOnly = { type: 'FeatureCollection', features: feats.filter(f => String((f.properties && f.properties.customer_address_id) || '') === String(addrId)) };
+                        this.map.showCheckinsGeojson(addrOnly);
+                        try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
+                        return;
+                    }
+                    // Show all checkins whose fc_id is in fcsAtAddr
+                    const filtered = { type: 'FeatureCollection', features: feats.filter(f => f && f.properties && fcsAtAddr.has(String(f.properties.fc_id))) };
+                    this.map.showCheckinsGeojson(filtered);
+                    try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
+                    return;
+                }
+            }
+        } catch (e) { /* ignore */ }
+
         // Highlight and center address
         let ok = this.map.highlightAddress(addrId, { fit: true });
         
