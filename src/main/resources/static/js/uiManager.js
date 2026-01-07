@@ -234,6 +234,16 @@ class UIManager {
         let debounceTimer;
         let focusedIndex = -1;
         this.cCombo.oninput = (e) => {
+            // When customer combobox changes, immediately clear dependent controls (address, fc)
+            try {
+                if (this.addressCombo) { this.addressCombo.value = ''; this.addressCombo.dataset.selectedId = ''; }
+                if (this.addressResults) { this.addressResults.style.display = 'none'; this._detachDropdownRepositioner(this.addressResults); }
+            } catch (e) { /* ignore */ }
+            try {
+                if (this.fcCombo) { this.fcCombo.value = ''; this.fcCombo.dataset.selectedId = ''; }
+                if (this.fcResults) { this.fcResults.style.display = 'none'; this._detachDropdownRepositioner(this.fcResults); }
+            } catch (e) { /* ignore */ }
+
             clearTimeout(debounceTimer);
             const q = e.target.value || '';
             debounceTimer = setTimeout(() => onQuery(q, 0), 300);
@@ -367,7 +377,13 @@ class UIManager {
 
     hideCustomerResults() { if (this.cResults) this.cResults.style.display = 'none'; }
 
-    setCustomerValue(name, id) { if (this.cCombo) { this.cCombo.value = name; this.cCombo.dataset.selectedId = String(id); } }
+    setCustomerValue(name, id) { if (this.cCombo) { this.cCombo.value = name; this.cCombo.dataset.selectedId = String(id); } 
+        // Clear dependent controls immediately when a customer is chosen
+        try { if (this.addressCombo) { this.addressCombo.value = ''; this.addressCombo.dataset.selectedId = ''; } } catch(e) {}
+        try { if (this.addressResults) { this.addressResults.style.display = 'none'; this._detachDropdownRepositioner(this.addressResults); } } catch(e) {}
+        try { if (this.fcCombo) { this.fcCombo.value = ''; this.fcCombo.dataset.selectedId = ''; } } catch(e) {}
+        try { if (this.fcResults) { this.fcResults.style.display = 'none'; this._detachDropdownRepositioner(this.fcResults); } } catch(e) {}
+    }
 
     getSelectedCustomerId() { return this.cCombo ? this.cCombo.dataset.selectedId : null; }
 
