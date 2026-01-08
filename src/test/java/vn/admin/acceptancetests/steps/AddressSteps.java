@@ -310,8 +310,8 @@ public class AddressSteps {
         }
     }
 
-    @When("the user selects the appl_id {string} and the addess {string} to the map")
-    public void the_user_selects_the_appl_id_and_the_addess_to_the_map(String applId, String address) {
+    @When("the user selects the appl_id {string} and the address {string} to the map")
+    public void the_user_selects_the_appl_id_and_the_address_to_the_map(String applId, String address) {
         // reuse existing flows but avoid selecting an FC
         the_user_selects_the_appl_id_to_the_map(applId);
         // select the address to the map (without selecting an FC)

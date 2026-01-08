@@ -8,6 +8,7 @@ plugins {
 serenity {
     testRoot = "features"
     requirementsDir = "src/test/resources/features"
+    outputDirectory = "$buildDir/serenity"
 }
 
 group = 'vn.admin'
@@ -127,47 +128,17 @@ tasks.withType(Jar).configureEach {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
-// Convenience task: publish/copy generated Serenity report into Maven-style
-// `target/site/serenity` directory so tools or humans opening that path will
-// see the same report produced by the Gradle aggregate step.
-tasks.register('publishSerenityToTarget', Copy) {
-    // Do not depend on 'aggregate' (circular). Instead, run this immediately after
-    // test completes so that the aggregate task can read the copied files from
-    // `target/site/serenity` (avoids race conditions where aggregate runs before
-    // files are available).
-    def serenityDir = file("$buildDir/serenity")
+// Convenience task: publishing the Serenity report to `target/site/serenity` was removed to avoid long-copy waits
+// The previous behavior copied files after tests and added dependencies that slowed the developer loop.
+// If you need a one-off publish step later, re-add a small Copy task manually or run a separate script.
 
-    // Only publish if Serenity has produced outcome files (summary.json/xml or summary.txt)
-    onlyIf {
-        serenityDir.exists() && serenityDir.listFiles()?.find { f ->
-            f.name.endsWith('.json') || f.name.endsWith('.xml') || f.name == 'summary.txt'
-        } != null
-    }
-
-    from serenityDir
-    into 'target/site/serenity'
-
-    doFirst {
-        logger.lifecycle("Publishing Serenity report from ${serenityDir} to target/site/serenity")
-        delete file('target/site/serenity')
-    }
-}
-
-// Ensure publish happens immediately after tests complete, and make aggregate
-// depend on the published files so it always reads a stable `target/site/serenity`.
-tasks.named('test') {
-    finalizedBy 'publishSerenityToTarget'
-}
+// Previously the test task finalized by publishing serenity outputs; removed to avoid long waits after test completion.
 
 tasks.named('aggregate') {
-    dependsOn 'publishSerenityToTarget'
     dependsOn 'waitForSerenityOutputs'
 }
 
-// Fix Gradle 9 implicit dependency warning/error: clearReports should run before publishSerenityToTarget if both are in the graph
-tasks.named('publishSerenityToTarget') {
-    mustRunAfter 'clearReports'
-}
+// (Removed) publishSerenityToTarget task references cleaned up above.
 
 // Ensure the Gradle aggregate report waits for Serenity output files to appear
 // (avoids an intermittent race where the report runs before the reporter has

@@ -239,6 +239,35 @@ public class MapInteractionSteps {
         the_first_focused_customer_should_be_visible();
     }
 
+    @When("the user records the visible checkin count")
+    public void the_user_records_the_visible_checkin_count() {
+        int cnt = vn.admin.acceptancetests.questions.CheckinMarkersCount.now().answeredBy(OnStage.theActorInTheSpotlight());
+        OnStage.theActorInTheSpotlight().remember("recorded_checkin_count", cnt);
+    }
+
+    @When("the user checks the showAllCheckins checkbox")
+    public void the_user_checks_the_showAllCheckins_checkbox() {
+        OnStage.theActorInTheSpotlight().attemptsTo(ClickElementById.withId("showAllCheckins"));
+        // Wait up to a few seconds for map to update
+        int attempts = 0;
+        int recorded = 0;
+        try { Object r = OnStage.theActorInTheSpotlight().recall("recorded_checkin_count"); if (r instanceof Integer) recorded = (Integer) r; } catch (Exception e) { }
+        while (attempts < 20) {
+            int now = vn.admin.acceptancetests.questions.CheckinMarkersCount.now().answeredBy(OnStage.theActorInTheSpotlight());
+            if (recorded == 0 || now >= recorded) return; // updated
+            try { Thread.sleep(250); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            attempts++;
+        }
+    }
+
+    @Then("the visible checkin count should be greater or equal to the recorded count")
+    public void the_visible_checkin_count_should_be_greater_or_equal_to_the_recorded_count() {
+        Object r = OnStage.theActorInTheSpotlight().recall("recorded_checkin_count");
+        int recorded = (r instanceof Integer) ? (Integer) r : 0;
+        int now = vn.admin.acceptancetests.questions.CheckinMarkersCount.now().answeredBy(OnStage.theActorInTheSpotlight());
+        if (now < recorded) throw new AssertionError("checkin count decreased: recorded=" + recorded + " now=" + now);
+    }
+
     @When("the user moves focus up to the second item")
     public void the_user_moves_focus_up_to_the_second_item() {
         WebDriver driver = getDriver();
