@@ -558,9 +558,9 @@ class App {
             await this.updateShowFcPredEnabled();
         } catch (e) { /* ignore */ }
 
-        const checkinsGeo = await this.api.getCheckinsGeoJson(applId, '', 0, 1000); // page checkins with reasonable default
-        this.map.showCheckinsGeojson(checkinsGeo);
-        try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
+        // Do not auto-show all checkins when a customer is selected (avoids showing unrelated FC checkins).
+        // Clear any checkins so the UI only displays checkins when the user explicitly selects an address or an FC.
+        this.map.clearCheckins();
 
         const fcids = await this.api.getCheckinFcIds(applId);
         this.ui.populateFcIds(fcids);
@@ -662,8 +662,18 @@ class App {
             try { console.log('[App] handleAddressChange decision addrId=', addrId, 'isExact=', isExact, 'uiVersion=', uiVersion, 'map._addressExactById=', this.map._addressExactById); } catch (e) {}
             this.ui.setShowFcPredEnabled(!isExact, uiVersion);
         } catch (e) { /* ignore */ }
-        // Filter checkins to this address
-        this.map.filterCheckinsByAddressId(addrId);
+        // Fetch checkins for the selected customer and show only those related to this address
+        try {
+            const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+            if (applId) {
+                const allCheckins = await this.api.getCheckinsGeoJson(applId, '', 0, 1000);
+                const addrOnly = { type: 'FeatureCollection', features: (allCheckins && allCheckins.features) ? allCheckins.features.filter(f => String((f.properties && f.properties.customer_address_id) || '') === String(addrId)) : [] };
+                this.map.showCheckinsGeojson(addrOnly);
+                try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
+            } else {
+                this.map.clearCheckins();
+            }
+        } catch (e) { /* ignore */ }
 
         // Reverse-geocode the selected address and populate administrative selects
         try {
@@ -703,8 +713,17 @@ class App {
     }
 
     async handleFcChange(fcId) {
-        // filter checkins by fc
-        this.map.filterCheckinsByFcId(fcId);
+        // Load and show checkins for the selected FC (do not rely on previously-loaded customer-wide checkins)
+        try {
+            const applId = this.selectedCustomerId || this.ui.getSelectedCustomerId();
+            if (applId && fcId) {
+                const checkins = await this.api.getCheckinsGeoJson(applId, fcId, 0, 1000);
+                this.map.showCheckinsGeojson(checkins);
+                try { await this.map.waitForMapLayersReady(2000); } catch (e) { }
+            } else {
+                this.map.clearCheckins();
+            }
+        } catch (e) { /* ignore */ }
         
         // Disable/enable the Show Predicted button when there's insufficient variation in checkins
         // Use a version token to prevent race conditions from async checkins fetch
