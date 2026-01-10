@@ -261,7 +261,7 @@ This project uses the Cucumber JUnit Platform engine together with the
 `serenity-cucumber` adapter to produce Serenity outcomes and HTML reports.
 
 Key points:
-- Use the published Serenity adapter that matches the Serenity core version (this project uses `net.serenity-bdd:serenity-cucumber:5.0.2`).
+- Use the published Serenity adapter that matches the Serenity core version (this project uses `net.serenity-bdd:serenity-cucumber:5.1.0`).
 - Make the Cucumber JUnit Platform engine available at test runtime: `io.cucumber:cucumber-junit-platform-engine:7.x`.
 - Register the Serenity reporter implementation provided by the `serenity-cucumber` adapter in `src/test/resources/cucumber.properties`:
 

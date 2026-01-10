@@ -2,7 +2,7 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.5.9' // bump to latest patch
     id 'io.spring.dependency-management' version '1.1.7'
-    id "net.serenity-bdd.serenity-gradle-plugin" version "5.0.1-FINAL" // Reverted to previous version
+    id "net.serenity-bdd.serenity-gradle-plugin" version "5.0.1-FINAL" // plugin version remains at 5.0.1-FINAL (no 5.1.0-FINAL plugin found in Gradle registry)
 }
 
 serenity {
@@ -82,21 +82,21 @@ dependencies {
     testImplementation 'org.testcontainers:postgresql:1.18.3'
     testImplementation 'org.testcontainers:testcontainers:1.18.3'
     
-    // Serenity BDD 5.0.2
-    testImplementation "net.serenity-bdd:serenity-core:5.0.2"
+    // Serenity BDD 5.1.0
+    testImplementation "net.serenity-bdd:serenity-core:5.1.0"
     // Use the 5.x Serenity Cucumber adapter to match Serenity 5.x
-    testImplementation "net.serenity-bdd:serenity-cucumber:5.0.2"
+    testImplementation "net.serenity-bdd:serenity-cucumber:5.1.0"
     // (Removed) Attempted compatibility layer for Cucumber 6/7; the artifact
     // `net.serenity-bdd:serenity-cucumber6:4.0.30` is not available from Maven Central
     // so we rely on `serenity-cucumber` below. If you need a Cucumber 6/7 adapter,
     // add the correct published artifact here once identified.
-    testImplementation "net.serenity-bdd:serenity-junit5:5.0.2"
+    testImplementation "net.serenity-bdd:serenity-junit5:5.1.0"
     // We use JUnit Platform + the Cucumber JUnit Platform engine. The legacy runner
     // has been removed in favor of `cucumber-junit-platform-engine` + the Serenity reporter
     // registered via `src/test/resources/cucumber.properties`.
-    testImplementation "net.serenity-bdd:serenity-screenplay:5.0.2"
-    testImplementation "net.serenity-bdd:serenity-screenplay-webdriver:5.0.2"
-    testImplementation "net.serenity-bdd:serenity-ensure:5.0.2"
+    testImplementation "net.serenity-bdd:serenity-screenplay:5.1.0"
+    testImplementation "net.serenity-bdd:serenity-screenplay-webdriver:5.1.0"
+    testImplementation "net.serenity-bdd:serenity-ensure:5.1.0"
     
     // Test Engines
     testImplementation "org.junit.platform:junit-platform-suite:1.10.1"
