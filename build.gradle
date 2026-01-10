@@ -137,23 +137,50 @@ tasks.named('test') {
         systemProperty 'serenity.test.root', 'features'
         systemProperty 'serenity.requirements.dir', 'src/test/resources/features'
 
-        // Opt-in helper: set `-PusePlaywright` or `-Dwebdriver.driver=playwright` to use Playwright driver
-        if (System.getProperty('webdriver.driver') == null && project.hasProperty('usePlaywright')) {
-            systemProperty 'webdriver.driver', 'playwright'
-        }
-
-        if (System.getProperty('webdriver.driver') == 'playwright') {
+        // Opt-in helper: set `-PusePlaywright` to enable Playwright integration for tests
+        // NOTE: At present, Serenity's Playwright integration does not replace the built-in
+        // WebDriver driver type. Avoid setting `webdriver.driver=playwright` (unsupported)
+        // and instead enable the Playwright extension via `serenity.playwright.enabled=true`.
+        if (project.hasProperty('usePlaywright')) {
+            systemProperty 'serenity.playwright.enabled', 'true'
             if (System.getProperty('serenity.playwright.browser') == null) systemProperty 'serenity.playwright.browser', 'chromium'
             if (System.getProperty('serenity.playwright.headless') == null) systemProperty 'serenity.playwright.headless', 'true'
         }
     }
 }
 
-// Convenience task to install Playwright browsers (requires `npx` / Node.js). This will not fail the build if `npx` is unavailable.
+// Convenience task to install Playwright browsers (requires `npx` / Node.js).
+// This task attempts a best-effort install without requiring sudo:
+// - If `package.json` is missing, it installs `@playwright/test` as a dev dependency
+// - If running as root it will run `npx playwright install --with-deps` to also
+//   install OS packages; otherwise it will install browser binaries only (no sudo)
 tasks.register('installPlaywrightBrowsers', Exec) {
     group = 'verification'
-    description = 'Install Playwright browsers (requires npx/node).'
-    commandLine 'bash', '-lc', 'if command -v npx >/dev/null 2>&1; then npx playwright install --with-deps; else echo "npx not found; skipping Playwright browser install"; fi'
+    description = 'Install Playwright browsers (requires npx/node). Best-effort: avoids sudo when not available.'
+    // Use a shell script that handles the various environments in a robust way.
+    commandLine 'bash', '-lc', '''
+        set -e
+        if ! command -v npx >/dev/null 2>&1; then
+            echo "npx not found; skipping Playwright browser install"
+            exit 0
+        fi
+
+        # Ensure we have a Playwright dependency in package.json so npx behaves predictably
+        if [ ! -f package.json ]; then
+            echo "No package.json found; initializing npm project and installing @playwright/test"
+            npm init -y >/dev/null 2>&1 || true
+            npm install --no-audit --no-fund --save-dev @playwright/test >/dev/null 2>&1 || npm install --save-dev @playwright/test
+        fi
+
+        # If we are root, request OS deps as well; non-root installs browser binaries only
+        if [ "$(id -u)" -eq 0 ]; then
+            echo "Running as root: installing Playwright browsers and system dependencies"
+            npx playwright install --with-deps
+        else
+            echo "Non-root environment: installing Playwright browser binaries only (chrome, firefox, webkit)"
+            npx playwright install chromium firefox webkit
+        fi
+    '''
 } 
 
 tasks.withType(Copy).configureEach {
