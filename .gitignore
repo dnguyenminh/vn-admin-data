@@ -70,3 +70,8 @@ replay_pid*
 
 # Ignore built static and generated assets
 bin/
+
+# Node/npm
+node_modules/
+# Optional: lockfiles (keep if you want deterministic installs)
+# package-lock.json
