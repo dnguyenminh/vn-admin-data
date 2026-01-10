@@ -103,4 +103,31 @@ describe('MapManager', () => {
     m.highlightWard('w1', { fit: false });
     expect(fitSpy).not.toHaveBeenCalled();
   });
+
+  test('findAddressMarkerByLatLng finds marker within tolerance', () => {
+    // provide a simple latLng implementation that calculates distance in meters from degree diffs
+    global.L.latLng = jest.fn((a,b) => ({ lat: a, lng: b, distanceTo: function(other){ const d = Math.sqrt((this.lat - other.lat)**2 + (this.lng - other.lng)**2) * 111000; return d; } }));
+    const marker = { getLatLng: jest.fn(() => global.L.latLng(10.0000, 20.0000)), openPopup: jest.fn() };
+    const MapManager = require('../../../src/main/resources/static/js/mapManager.js').default;
+    const m = new MapManager('map');
+    m._addressMarkersById = { '1': marker };
+
+    const found = m.findAddressMarkerByLatLng(10.0001, 20.0001, 50);
+    expect(found).toBe(marker);
+  });
+
+  test('openPopupAtLatLng opens popup and recenters', () => {
+    global.L.latLng = jest.fn((a,b) => ({ lat: a, lng: b, distanceTo: function(other){ const d = Math.sqrt((this.lat - other.lat)**2 + (this.lng - other.lng)**2) * 111000; return d; } }));
+    const marker = { getLatLng: jest.fn(() => global.L.latLng(10.5000, 105.1000)), openPopup: jest.fn() };
+    const MapManager = require('../../../src/main/resources/static/js/mapManager.js').default;
+    const m = new MapManager('map');
+    m._addressMarkersById = { 'foo': marker };
+    m.map.setView = jest.fn();
+    m.map.getZoom = jest.fn(() => 12);
+
+    const res = m.openPopupAtLatLng(10.5000, 105.1000, 50);
+    expect(res).toBe(true);
+    expect(marker.openPopup).toHaveBeenCalled();
+    expect(m.map.setView).toHaveBeenCalledWith(marker.getLatLng(), Math.max(12,15));
+  });
 });

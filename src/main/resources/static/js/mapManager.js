@@ -22,18 +22,20 @@ class MapManager {
         try { window.__app_map_ready = !!this.map; window.__app_ready = !!this.map; } catch (e) { /* ignore */ }
 
         this.labelGroup = L.layerGroup().addTo(this.map);
-        // Single merged layer for all points (addresses, checkins, predicted)
-        this.allLayer = L.layerGroup().addTo(this.map);
+        // Merged layer for all points: addresses, checkins, predictions
+        this.pointsLayer = L.layerGroup().addTo(this.map);
+        // For connector lines
+        this.connectorLayer = L.layerGroup().addTo(this.map);
         // Instrument allLayer.addLayer to surface errors during add and to log additions
         try {
-            const origAdd = this.allLayer.addLayer.bind(this.allLayer);
-            this.allLayer.addLayer = (layer) => {
+            const origAdd = this.pointsLayer.addLayer.bind(this.pointsLayer);
+            this.pointsLayer.addLayer = (layer) => {
                 try {
                     const res = origAdd(layer);
-                    try { console.log('[MapManager] allLayer.addLayer ok, layer=', (layer && (layer._leaflet_id || (layer.options && layer.options.title) || (layer.options && layer.options.className)))); } catch(e){}
+                    try { console.log('[MapManager] pointsLayer.addLayer ok, layer=', (layer && (layer._leaflet_id || (layer.options && layer.options.title) || (layer.options && layer.options.className)))); } catch(e){}
                     return res;
                 } catch (e) {
-                    console.error('[MapManager] allLayer.addLayer threw', e, layer);
+                    console.error('[MapManager] pointsLayer.addLayer threw', e, layer);
                     throw e;
                 }
             };
@@ -106,7 +108,7 @@ class MapManager {
         this.districtLayer.clearLayers();
         this.wardLayer.clearLayers();
         this.labelGroup.clearLayers();
-        if (this.allLayer && this.allLayer.clearLayers) this.allLayer.clearLayers();
+        if (this.pointsLayer && this.pointsLayer.clearLayers) this.pointsLayer.clearLayers();
         // reset runtime caches
         this._addressMarkersById = {};
         this._allCheckinMarkers.length = 0;
@@ -149,7 +151,7 @@ class MapManager {
         // Remove existing address markers from allLayer
         try {
             for (const id in this._addressMarkersById) {
-                try { this.allLayer.removeLayer(this._addressMarkersById[id]); } catch (e) { }
+                try { this.pointsLayer.removeLayer(this._addressMarkersById[id]); } catch (e) { }
             }
         } catch (e) { /* ignore */ }
         this._addressMarkersById = {};
@@ -175,7 +177,7 @@ class MapManager {
             const html = `<div><strong>appl_id:</strong> ${this._escapeHtml(p.appl_id)}<br/><strong>address:</strong> ${this._escapeHtml(p.address || p.name)}<br/><strong>address_type:</strong> ${this._escapeHtml(p.address_type)}<br/><strong>location(lat, long):</strong> (${latlng[0].toFixed(6)}, ${latlng[1].toFixed(6)})</div>`;
             marker.bindPopup(html);
             try { marker.featureProps = p; marker.feature = feature; } catch (e) { }
-            try { marker.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(marker); } catch (e2) { console.error('[MapManager] add address marker failed', e, e2); } }
+            try { marker.addTo(this.map); } catch (e) { try { this.pointsLayer.addLayer(marker); } catch (e2) { console.error('[MapManager] add address marker failed', e, e2); } }
             if (p.id) {
                 const idStr = String(p.id);
                 this._addressMarkersById[idStr] = marker;
@@ -311,7 +313,7 @@ class MapManager {
             const marker = L.marker(latlng, { title: titleText, icon: L.divIcon({ className: 'predicted-marker', html: iconHtml, iconSize: [24, 24] }) });
             let html = `<div><strong>${this._escapeHtml(titleText)}</strong><br/>appl_id: ${this._escapeHtml(props.appl_id || props.applId)}<br/>addressId: ${this._escapeHtml(props.addressId)}<br/>adjusted: ${this._escapeHtml(props.adjusted)}<br/>areaLevel: ${this._escapeHtml(props.areaLevel)}</div>`;
             marker.bindPopup(html);
-            try { this.allLayer.addLayer(marker); } catch (e) { this.allLayer.addLayer(marker); }
+            try { this.pointsLayer.addLayer(marker); } catch (e) { this.pointsLayer.addLayer(marker); }
             // draw connector if possible
             try {
                 const aid = props.addressId ? String(props.addressId) : null;
@@ -320,7 +322,7 @@ class MapManager {
                     const predLL = L.latLng(latlng[0], latlng[1]);
                     const line = L.polyline([stored, predLL], { color: '#f39c12', weight: 2, dashArray: '4 6' });
                     line.bindTooltip(`${Math.round(stored.distanceTo(predLL))} m`, { permanent: true, className: 'connector-label' });
-                    try { this.allLayer.addLayer(line); } catch (e) { this.allLayer.addLayer(line); }
+                    try { this.connectorLayer.addLayer(line); } catch (e) { this.connectorLayer.addLayer(line); }
                 }
             } catch (e) { /* ignore connector errors */ }
             this.map.setView(latlng, Math.max(this.map.getZoom(), 15));
@@ -331,11 +333,11 @@ class MapManager {
     clearPredicted() {
         try {
             // Remove predicted markers from the allLayer (markers using 'predicted-marker' class)
-            if (this.allLayer && this.allLayer.eachLayer) {
-                this.allLayer.eachLayer(l => {
+            if (this.pointsLayer && this.pointsLayer.eachLayer) {
+                this.pointsLayer.eachLayer(l => {
                     try {
                         if (l && l.options && l.options.icon && l.options.icon.options && l.options.icon.options.className === 'predicted-marker') {
-                            this.allLayer.removeLayer(l);
+                            this.pointsLayer.removeLayer(l);
                         }
                     } catch (e) { /* ignore per-layer errors */ }
                 });
@@ -481,7 +483,7 @@ class MapManager {
                     html += `<strong>distance (m):</strong> ${dist}<br/>`;
                     const line = L.polyline([latlng, addrLatLng], { color: '#f39c12', weight: 2, dashArray: '4 6' });
                     line.bindTooltip(`${dist} m`, { permanent: false, className: 'connector-label' });
-                    try { line.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(line); } catch (e2) { /* ignore */ } }
+                    try { line.addTo(this.map); } catch (e) { try { this.pointsLayer.addLayer(line); } catch (e2) { /* ignore */ } }
                 } else {
                     // If we don't yet have the customer address coords locally, asynchronously fetch addresses
                     // for this application and update the marker popup & connector when found.
@@ -506,7 +508,7 @@ class MapManager {
                                         } catch (e) { /* ignore popup update errors */ }
                                         const line2 = L.polyline([latlng, foundLatLng], { color: '#f39c12', weight: 2, dashArray: '4 6' });
                                         line2.bindTooltip(`${dist2} m`, { permanent: false, className: 'connector-label' });
-                                        try { line2.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(line2); } catch (e2) { /* ignore */ } }
+                                        try { line2.addTo(this.map); } catch (e) { try { this.pointsLayer.addLayer(line2); } catch (e2) { /* ignore */ } }
                                     }
                                 } catch (e) { /* ignore per-checkin async errors */ }
                             }).catch(e => { /* ignore fetch errors */ });
@@ -522,7 +524,7 @@ class MapManager {
                         html += `<strong>distance to predicted (m):</strong> ${distPred}<br/>`;
                         const line2 = L.polyline([latlng, predLL], { color: '#9b59b6', weight: 2, dashArray: '2 6' });
                         line2.bindTooltip(`${distPred} m`, { permanent: false, className: 'connector-label' });
-                        try { line2.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(line2); } catch (e2) { /* ignore */ } }
+                        try { line2.addTo(this.map); } catch (e) { try { this.pointsLayer.addLayer(line2); } catch (e2) { /* ignore */ } }
                     }
                 } catch (e) { /* ignore predicted distance errors */ }
             }
@@ -539,7 +541,7 @@ class MapManager {
                     } catch (e) { /* ignore */ }
                 });
                 marker.addTo(this.map);
-            } catch (e) { try { this.allLayer.addLayer(marker); } catch (e2) { console.error('[MapManager] add checkin marker failed', e, e2); } }
+            } catch (e) { try { this.pointsLayer.addLayer(marker); } catch (e2) { console.error('[MapManager] add checkin marker failed', e, e2); } }
         });
         // Bring address markers to front so they remain visible above checkins/predictions
         try { Object.values(this._addressMarkersById || {}).forEach(m => { try { if (m && m.bringToFront) m.bringToFront(); } catch (e) {} }); } catch (e) { }
@@ -551,7 +553,7 @@ class MapManager {
     clearCheckins() {
         // remove checkin markers from allLayer
         this._allCheckinMarkers.forEach(obj => {
-            try { if (this.map && this.map.removeLayer) this.map.removeLayer(obj.marker); else this.allLayer.removeLayer(obj.marker); } catch (e) { try { this.allLayer.removeLayer(obj.marker); } catch (e2) { /* ignore */ } }
+            try { if (this.map && this.map.removeLayer) this.map.removeLayer(obj.marker); else this.pointsLayer.removeLayer(obj.marker); } catch (e) { try { this.pointsLayer.removeLayer(obj.marker); } catch (e2) { /* ignore */ } }
         });
         this._allCheckinMarkers.length = 0;
     }
@@ -560,11 +562,11 @@ class MapManager {
     filterCheckinsByAddressId(addrId) {
         // Remove all checkin markers, then add back the filtered ones
         this._allCheckinMarkers.forEach(obj => {
-            try { if (this.map && this.map.removeLayer) this.map.removeLayer(obj.marker); else this.allLayer.removeLayer(obj.marker); } catch (e) { try { this.allLayer.removeLayer(obj.marker); } catch (e2) { /* ignore */ } }
+            try { if (this.map && this.map.removeLayer) this.map.removeLayer(obj.marker); else this.pointsLayer.removeLayer(obj.marker); } catch (e) { try { this.pointsLayer.removeLayer(obj.marker); } catch (e2) { /* ignore */ } }
         });
         const toAdd = this._allCheckinMarkers.filter(obj => String(obj.featureProps && obj.featureProps.customer_address_id) === String(addrId));
         toAdd.forEach(obj => {
-            try { obj.marker.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(obj.marker); } catch (e2) { /* ignore */ } }
+            try { obj.marker.addTo(this.map); } catch (e) { try { this.pointsLayer.addLayer(obj.marker); } catch (e2) { /* ignore */ } }
         });
         // Ensure address markers are above checkins after filtering
         try { Object.values(this._addressMarkersById || {}).forEach(m => { try { if (m && m.bringToFront) m.bringToFront(); } catch (e) {} }); } catch (e) { }
@@ -574,11 +576,11 @@ class MapManager {
     filterCheckinsByFcId(fcId) {
         // Remove all checkin markers, then add back the filtered ones
         this._allCheckinMarkers.forEach(obj => {
-            try { if (this.map && this.map.removeLayer) this.map.removeLayer(obj.marker); else this.allLayer.removeLayer(obj.marker); } catch (e) { try { this.allLayer.removeLayer(obj.marker); } catch (e2) { /* ignore */ } }
+            try { if (this.map && this.map.removeLayer) this.map.removeLayer(obj.marker); else this.pointsLayer.removeLayer(obj.marker); } catch (e) { try { this.pointsLayer.removeLayer(obj.marker); } catch (e2) { /* ignore */ } }
         });
         const toAdd = fcId ? this._allCheckinMarkers.filter(obj => String(obj.featureProps && obj.featureProps.fc_id) === String(fcId)) : this._allCheckinMarkers.slice();
         toAdd.forEach(obj => {
-            try { obj.marker.addTo(this.map); } catch (e) { try { this.allLayer.addLayer(obj.marker); } catch (e2) { /* ignore */ } }
+            try { obj.marker.addTo(this.map); } catch (e) { try { this.pointsLayer.addLayer(obj.marker); } catch (e2) { /* ignore */ } }
         });
         // Ensure address markers are above checkins after filtering
         try { Object.values(this._addressMarkersById || {}).forEach(m => { try { if (m && m.bringToFront) m.bringToFront(); } catch (e) {} }); } catch (e) { }
@@ -619,6 +621,44 @@ class MapManager {
         try {
             if (!this.map) return false;
             this.map.setView([lat, lng], Math.max(this.map.getZoom() || 0, zoom));
+            return true;
+        } catch (e) { return false; }
+    }
+
+    // Find an address marker by approximate latitude/longitude.
+    // Returns the marker instance or null when none found within the tolerance (in meters).
+    findAddressMarkerByLatLng(lat, lng, tolMeters = 50) {
+        try {
+            const target = (typeof L !== 'undefined' && L.latLng) ? L.latLng(lat, lng) : { lat: lat, lng: lng, distanceTo: () => Infinity };
+            const markers = this._addressMarkersById || {};
+            for (const k of Object.keys(markers)) {
+                try {
+                    const m = markers[k];
+                    const mll = (m && m.getLatLng) ? m.getLatLng() : (this._addressLatLngById && this._addressLatLngById[String(k)]);
+                    if (!mll) continue;
+                    // Ensure we have a latLng-like object with distanceTo
+                    if (mll && typeof mll.distanceTo === 'function') {
+                        const d = target.distanceTo(mll);
+                        if (d <= tolMeters) return m;
+                    } else if (typeof L !== 'undefined' && L.latLng) {
+                        const mll2 = L.latLng(mll.lat || mll[0], mll.lng || mll[1]);
+                        const d2 = target.distanceTo(mll2);
+                        if (d2 <= tolMeters) return m;
+                    }
+                } catch (e) { /* ignore per-marker errors */ }
+            }
+        } catch (e) { /* ignore */ }
+        return null;
+    }
+
+    // Open the popup for an address marker near the given lat/lng and recenter the map.
+    // Returns true when a popup was opened; false otherwise.
+    openPopupAtLatLng(lat, lng, tolMeters = 50) {
+        try {
+            const m = this.findAddressMarkerByLatLng(lat, lng, tolMeters);
+            if (!m) return false;
+            try { if (m.openPopup) m.openPopup(); } catch (e) { /* ignore */ }
+            try { if (m.getLatLng && this.map && this.map.setView) this.map.setView(m.getLatLng(), Math.max(this.map.getZoom() || 0, 15)); } catch (e) { /* ignore */ }
             return true;
         } catch (e) { return false; }
     }

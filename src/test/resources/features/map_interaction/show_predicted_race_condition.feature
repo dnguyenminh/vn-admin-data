@@ -1,6 +1,5 @@
 Feature: Prevent race condition where Show Predicted button flips state incorrectly
 
-  @race
   Scenario: Show Predicted button remains disabled when address exactness is preserved across address layer reload
     Given the user is on the map page
     And the map and app scaffolding are ready

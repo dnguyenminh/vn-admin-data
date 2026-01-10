@@ -2,13 +2,15 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.5.9' // bump to latest patch
     id 'io.spring.dependency-management' version '1.1.7'
-    id "net.serenity-bdd.serenity-gradle-plugin" version "5.0.1-FINAL"
+    id "net.serenity-bdd.serenity-gradle-plugin" version "5.0.1-FINAL" // Reverted to previous version
 }
 
 serenity {
     testRoot = "features"
     requirementsDir = "src/test/resources/features"
-    outputDirectory = "$buildDir/serenity"
+    // Use an absolute string path for the output directory so the plugin and reporters
+    // don't capture a Provider object (avoids the weird 'map(...)' paths in reports).
+    outputDirectory = layout.buildDirectory.dir("serenity").get().asFile.absolutePath
 }
 
 group = 'vn.admin'
@@ -20,16 +22,16 @@ java {
     }
 }
 
-configurations.all {
+configurations.configureEach {
     resolutionStrategy {
-        force 'org.jetbrains.kotlin:kotlin-stdlib:1.9.22'
-        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.22'
-        force 'org.jetbrains.kotlin:kotlin-reflect:1.9.22'
+        cacheChangingModulesFor 0, 'seconds'
     }
 }
 
 repositories {
     mavenCentral()
+    maven { url 'https://repo.maven.apache.org/maven2' } // Ensure Maven Central is explicitly included
+    maven { url 'https://jitpack.io' } // Add JitPack for additional dependencies
 }
 
 dependencies {
@@ -38,7 +40,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
 
     // 2. Database & PostGIS (Bắt buộc phải có bản mới để khớp Hibernate 6)
-    implementation 'org.postgresql:postgresql:42.7.4'
+    implementation 'org.postgresql:postgresql:42.7.8' // Updated to fix CVE-2025-49146 (CVE-2025-49146)
     implementation 'org.hibernate.orm:hibernate-spatial:6.6.1.Final'
     // Database migrations
     implementation 'org.flywaydb:flyway-core:9.20.1'
@@ -69,9 +71,14 @@ dependencies {
     annotationProcessor 'org.projectlombok:lombok'
     annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
 
+    // Security: upgrade commons-lang3 to fix CVE-2025-48924 (Uncontrolled recursion -> StackOverflowError)
+    implementation 'org.apache.commons:commons-lang3:3.18.0'
+
     // Testing
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    testImplementation 'org.testcontainers:junit-jupiter:1.18.3'
+    testImplementation('org.testcontainers:junit-jupiter:1.21.4') {
+        exclude group: 'org.apache.commons', module: 'commons-lang3'
+    }
     testImplementation 'org.testcontainers:postgresql:1.18.3'
     testImplementation 'org.testcontainers:testcontainers:1.18.3'
     
@@ -115,10 +122,13 @@ tasks.named('test') {
 
     // Ensure Serenity outcome files are written to a predictable Gradle build
     // directory (so reports are reproducible and not dependent on CLI flags).
-    systemProperty 'serenity.outputDirectory', "$buildDir/serenity"
-    systemProperty 'serenity.test.root', 'features'
-    systemProperty 'serenity.requirements.dir', 'src/test/resources/features'
-}
+    // Set the output directory at execution time to avoid non-serializable task inputs
+    doFirst {
+        systemProperty 'serenity.outputDirectory', layout.buildDirectory.dir("serenity").get().asFile.absolutePath
+        systemProperty 'serenity.test.root', 'features'
+        systemProperty 'serenity.requirements.dir', 'src/test/resources/features'
+    }
+} 
 
 tasks.withType(Copy).configureEach {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
@@ -145,7 +155,7 @@ tasks.named('aggregate') {
 // flushed JSON/XML files produced by the test runner)
 tasks.register('waitForSerenityOutputs') {
     doLast {
-        def dir = file("$buildDir/serenity")
+        def dir = layout.buildDirectory.dir("serenity").get().asFile
         def timeoutSeconds = 30
         def waited = 0
         def found = false
@@ -160,10 +170,10 @@ tasks.register('waitForSerenityOutputs') {
         }
 
         if (!found) {
-            logger.warn("No Serenity output files found in ${dir} after ${timeoutSeconds}s. Aggregated report may be empty.")
+            logger.warn("No Serenity output files found in ${dir.absolutePath} after ${timeoutSeconds}s. Aggregated report may be empty.")
             // Optionally fail the build to force investigation; for now we warn and continue
         } else {
-            logger.lifecycle("Serenity outputs detected in ${dir} after ${waited}s, proceeding to aggregate reports.")
+            logger.lifecycle("Serenity outputs detected in ${dir.absolutePath} after ${waited}s, proceeding to aggregate reports.")
         }
     }
 }
@@ -173,12 +183,16 @@ tasks.named('aggregate') {
     dependsOn 'waitForSerenityOutputs'
 }
 
-// Convenience task to run the app with the 'dev' profile enabled (useful to enable frontend redirect)
-tasks.register('bootRunDev', org.springframework.boot.gradle.tasks.run.BootRun) {
+// Ensure the Spring Boot plugin is applied
+apply plugin: 'org.springframework.boot'
+
+// Fix the `BootRun` task registration
+import org.springframework.boot.gradle.tasks.run.BootRun
+
+tasks.register('bootRunDev', BootRun) {
     group = 'application'
-    description = 'Run Spring Boot with dev profile (enables frontend.dev redirect)'
-    systemProperty 'spring.profiles.active', 'dev'
-    jvmArgs = ['-Dspring.profiles.active=dev']
+    description = 'Run the application with the development profile'
+    args = ['--spring.profiles.active=dev']
 }
 
 // Make the default bootRun use the dev profile so './gradlew bootRun' works for local development
@@ -186,4 +200,20 @@ tasks.register('bootRunDev', org.springframework.boot.gradle.tasks.run.BootRun) 
 tasks.named('bootRun') {
     systemProperty 'spring.profiles.active', 'dev'
     jvmArgs = ['-Dspring.profiles.active=dev']
+}
+
+// Remove project-level 'bin' directory during clean to avoid checking in generated artifacts
+// Some legacy or packaging steps may create a top-level `bin/` directory; ensure `./gradlew clean` removes it.
+tasks.register('cleanBin') {
+    doLast {
+        def dir = file('bin')
+        if (dir.exists()) {
+            logger.lifecycle("Removing legacy/generated 'bin' directory: ${dir}")
+            delete dir
+        }
+    }
+}
+
+tasks.named('clean') {
+    dependsOn 'cleanBin'
 }

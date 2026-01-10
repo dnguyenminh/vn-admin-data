@@ -14,7 +14,7 @@ import static net.serenitybdd.screenplay.Tasks.instrumented;
 
 public class FetchSelectedCustomerAddress extends AbstractFetchCustomerAddress implements Task {
 
-    private final String applId;
+    private String applId;
     private final String address;
 
     public FetchSelectedCustomerAddress(String applId, String address) {
@@ -28,6 +28,9 @@ public class FetchSelectedCustomerAddress extends AbstractFetchCustomerAddress i
 
     @Override
     public <T extends Actor> void performAs(T actor) {
+        if(null == applId) {
+            this.applId = actor.recall("current_appl_id");
+        }
         Map<String, JsonNode> addressMap = actor.recall("customer_addresses_" + applId);
         if (addressMap != null) {
             if (addressMap.containsKey(address)) {
@@ -46,7 +49,8 @@ public class FetchSelectedCustomerAddress extends AbstractFetchCustomerAddress i
                                 break;
                             }
                         }
-                    } catch (Throwable ignore) { }
+                    } catch (Throwable ignore) {
+                    }
                 }
             }
         }

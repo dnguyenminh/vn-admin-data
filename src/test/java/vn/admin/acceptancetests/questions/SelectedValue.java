@@ -3,6 +3,7 @@ package vn.admin.acceptancetests.questions;
 import net.serenitybdd.screenplay.Actor;
 import net.serenitybdd.screenplay.Question;
 import net.serenitybdd.screenplay.targets.Target;
+import vn.admin.acceptancetests.ui.ComboboxControl;
 
 public class SelectedValue implements Question<String> {
 
@@ -18,6 +19,6 @@ public class SelectedValue implements Question<String> {
 
     @Override
     public String answeredBy(Actor actor) {
-        return target.resolveFor(actor).getValue();
+        return target.find(ComboboxControl.INPUT_TEXT).resolveFor(actor).getValue();
     }
 }

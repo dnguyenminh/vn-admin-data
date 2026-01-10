@@ -24,13 +24,14 @@ public class FetchCustomerAddresses extends AbstractFetchCustomerAddress impleme
         return instrumented(FetchCustomerAddresses.class, applId);
     }
 
-    public String getApplId() {
-        return applId;
-    }
+//    public String getApplId() {
+//        return applId;
+//    }
 
     @Override
     public <T extends Actor> void performAs(T actor) {
         fetchCustomerAddress(actor, this.applId);
+        actor.remember("current_appl_id", applId);
     }
 
 }
