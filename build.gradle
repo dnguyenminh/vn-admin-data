@@ -2,7 +2,7 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.5.9' // bump to latest patch
     id 'io.spring.dependency-management' version '1.1.7'
-    id "net.serenity-bdd.serenity-gradle-plugin" version "5.0.1-FINAL" // plugin version remains at 5.0.1-FINAL (no 5.1.0-FINAL plugin found in Gradle registry)
+    id "net.serenity-bdd.serenity-gradle-plugin" version "5.1.0" // plugin version remains at 5.0.1-FINAL (no 5.1.0-FINAL plugin found in Gradle registry)
 }
 
 serenity {
@@ -97,7 +97,11 @@ dependencies {
     testImplementation "net.serenity-bdd:serenity-screenplay:5.1.0"
     testImplementation "net.serenity-bdd:serenity-screenplay-webdriver:5.1.0"
     testImplementation "net.serenity-bdd:serenity-ensure:5.1.0"
-    
+
+    // Playwright integration (optional opt-in via -PusePlaywright or -Dwebdriver.driver=playwright)
+    testImplementation "net.serenity-bdd:serenity-playwright:5.1.0"
+    testImplementation "com.microsoft.playwright:playwright:1.39.0"
+
     // Test Engines
     testImplementation "org.junit.platform:junit-platform-suite:1.10.1"
     // Add legacy JUnit4 + Vintage engine to allow running Serenity's JUnit4 Cucumber runner
@@ -114,6 +118,11 @@ dependencies {
     testImplementation "io.cucumber:cucumber-junit-platform-engine:7.15.0"
     // Explicit AssertJ core to satisfy serenity-ensure (avoids NoClassDefFoundError on AssertJ internals)
     testImplementation 'org.assertj:assertj-core:3.24.2'
+
+    // Serenity Playwright integration
+    testImplementation "net.serenity-bdd:serenity-playwright:5.1.0"
+    // Playwright Java client (used by serenity-playwright)
+    testImplementation "com.microsoft.playwright:playwright:1.45.0"
 }
 
 tasks.named('test') {
@@ -127,7 +136,24 @@ tasks.named('test') {
         systemProperty 'serenity.outputDirectory', layout.buildDirectory.dir("serenity").get().asFile.absolutePath
         systemProperty 'serenity.test.root', 'features'
         systemProperty 'serenity.requirements.dir', 'src/test/resources/features'
+
+        // Opt-in helper: set `-PusePlaywright` or `-Dwebdriver.driver=playwright` to use Playwright driver
+        if (System.getProperty('webdriver.driver') == null && project.hasProperty('usePlaywright')) {
+            systemProperty 'webdriver.driver', 'playwright'
+        }
+
+        if (System.getProperty('webdriver.driver') == 'playwright') {
+            if (System.getProperty('serenity.playwright.browser') == null) systemProperty 'serenity.playwright.browser', 'chromium'
+            if (System.getProperty('serenity.playwright.headless') == null) systemProperty 'serenity.playwright.headless', 'true'
+        }
     }
+}
+
+// Convenience task to install Playwright browsers (requires `npx` / Node.js). This will not fail the build if `npx` is unavailable.
+tasks.register('installPlaywrightBrowsers', Exec) {
+    group = 'verification'
+    description = 'Install Playwright browsers (requires npx/node).'
+    commandLine 'bash', '-lc', 'if command -v npx >/dev/null 2>&1; then npx playwright install --with-deps; else echo "npx not found; skipping Playwright browser install"; fi'
 } 
 
 tasks.withType(Copy).configureEach {
