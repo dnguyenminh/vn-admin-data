@@ -287,6 +287,25 @@ open build/serenity/index.html  # or cat build/serenity/summary.txt
 
 ---
 
+## Playwright integration (optional)
+If you want to use Playwright to improve UI test stability, there is an opt-in Playwright integration with a short guide in the repository:
+
+- Full guide: `docs/PLAYWRIGHT.md`
+- Quick commands:
+
+```bash
+# install Playwright browsers (optional but recommended)
+./gradlew installPlaywrightBrowsers
+# run tests with Playwright enabled (opt-in)
+./gradlew -PusePlaywright test -Dserenity.playwright.browser=chromium
+```
+
+Notes:
+- Do **not** set `-Dwebdriver.driver=playwright`. Instead enable Playwright with `-PusePlaywright` (the Gradle property sets `serenity.playwright.enabled=true`).
+- See `docs/PLAYWRIGHT.md` for CI steps and migration guidance.
+
+---
+
 ## Next steps I can take (pick any)
 - Add `docker-compose.yml` to spin up PostGIS + import service. ✅
 - Export per-province GeoJSON files into `data/geojson/` for QA. ✅

@@ -32,6 +32,7 @@ Testing notes & examples
 - Unit tests: `src/test/java/vn/admin/service/MapServiceUnitTest.java` shows mocking `JdbcTemplate` and reflectively injecting it into `MapService` for fast unit tests.
 - Integration tests: `src/test/java/vn/admin/MapApiIntegrationTest.java` uses Testcontainers with a PostGIS image (`postgis/postgis:15-3.3`) declared as compatible with `postgres`. Tests manually create extensions (`CREATE EXTENSION postgis`) and minimal schema, insert a simple `MULTIPOLYGON` via `ST_Multi(ST_GeomFromText(...))`, and assert GeoJSON payloads.
 - Test outputs: Serenity/Cucumber feature outcomes are placed under `build/serenity` and copied to `target/site/serenity` by the Gradle configuration.
+- Optional Playwright integration: this repo supports an opt-in Playwright driver via `net.serenity-bdd:serenity-playwright` and a convenience task `installPlaywrightBrowsers`. See `docs/PLAYWRIGHT.md` for details and CI install snippets.
 
 Developer tips & debugging
 - If testing SQL changes, validate against a PostGIS instance (local Docker Compose or Testcontainers) — PostGIS-specific behavior is the source of many subtle bugs.
